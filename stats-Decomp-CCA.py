@@ -10,11 +10,11 @@ from statsmodels.stats.multicomp import pairwise_tukeyhsd
 # =========================================================================
 # 1. SAISIE MANUELLE DE TES RÉSULTATS (À mettre à jour après tes décompositions)
 # =========================================================================
-# Rentre ici les 5 valeurs du nombre d'unités motrices (UM) lues dans MUedit
-MUs_Normal = [14, 14, 14, 14, 14]  # Groupe Contrôle (Signal pur de SYNCHRO)
-MUs_PLI    = [13, 13, 13, 13, 13]  # Interférence ligne électrique (50Hz + harmoniques)
-MUs_MA     = [12, 11, 12, 10, 11]  # Artefact de mouvement involontaire (dérive + secousse)
-MUs_SNR    = [4, 6, 6, 13, 11]  # Dégradation par bruit blanc (SNR : 3, 5, 11, 15, 20 dB)
+# Rentre ici les 5 valeurs du nombre d'unités motrices (UM) lues dans Decomp
+MUs_Normal = [3, 3, 3, 3, 3]  # Groupe Contrôle (Signal pur de SYNCHRO)
+MUs_PLI    = [4, 4, 4, 4, 4]  # Interférence ligne électrique (50Hz + harmoniques)
+MUs_MA     = [4, 3, 3, 3, 4]  # Artefact de mouvement involontaire (dérive + secousse)
+MUs_SNR    = [1, 1, 2, 3, 3]  # Dégradation par bruit blanc (SNR : 3, 5, 11, 15, 20 dB)
 
 # =========================================================================
 # 2. STRUCTURATION ET PREPARATION DU TABLEAU DE DONNÉES (DATAFRAME)
@@ -41,11 +41,11 @@ print("\n" + "="*40 + "\n")
 
 # --- SAUVEGARDE DES CALCULS ---
 # Option A : Enregistrement sous forme de fichier CSV (ouvrable directement dans Excel)
-stats_descriptives.to_csv('Resultats_Moyennes_MUedit.csv')
+stats_descriptives.to_csv('Resultats_Moyennes_Decomp.csv')
 
 # Option B : Enregistrement dans un fichier texte d'analyse complet
 with open("Rapport_Stats_Synthese.txt", "w", encoding="utf-8") as f:
-    f.write("=== RAPPORT DE SYNTHÈSE DES DECOMPOSITIONS MUEDIT ===\n\n")
+    f.write("=== RAPPORT DE SYNTHÈSE DES DECOMPOSITIONS Decomp ===\n\n")
     f.write("--- STATISTIQUES DESCRIPTIVES ---\n")
     f.write(stats_descriptives.to_string())
     f.write("\n\n" + "="*40 + "\n\n")
@@ -84,7 +84,7 @@ with open("Rapport_Stats_Synthese.txt", "a", encoding="utf-8") as f:
     f.write(str(tukey))
     f.write("\n")
 
-print("\n[INFO] Les calculs et résultats ont été enregistrés dans 'Resultats_Moyennes_MUedit.csv' et 'Rapport_Stats_Synthese.txt' !")
+print("\n[INFO] Les calculs et résultats ont été enregistrés dans 'Resultats_Moyennes_Decomp.csv' et 'Rapport_Stats_Synthese.txt' !")
 
 # =========================================================================
 # 6. REPRÉSENTATION GRAPHIQUE (Boxplot + Points individuels)
@@ -98,7 +98,7 @@ sns.boxplot(x='Condition', y='MUs_Retrouvees', data=df, palette='Set2', width=0.
 sns.stripplot(x='Condition', y='MUs_Retrouvees', data=df, color='black', alpha=0.6, size=6)
 
 # Paramétrage des titres et axes
-plt.title("Impact des artefacts sur l'extraction des UM (MUedit - CCA)", fontsize=12, fontweight='bold')
+plt.title("Impact des artefacts sur l'extraction des UM (Decomp - CCA)", fontsize=12, fontweight='bold')
 plt.xlabel("Condition / Type d'artefact appliqué", fontsize=10)
 plt.ylabel("Nombre d'Unités Motrices extraites (UM)", fontsize=10)
 plt.grid(axis='y', linestyle='--', alpha=0.7) # Ajoute une grille horizontale discrète

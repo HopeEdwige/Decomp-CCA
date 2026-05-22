@@ -1,19 +1,19 @@
-=== RAPPORT DE SYNTHÈSE DES DECOMPOSITIONS MUEDIT ===
+=== RAPPORT DE SYNTHÈSE DES DECOMPOSITIONS Decomp ===
 
 --- STATISTIQUES DESCRIPTIVES ---
            Moyenne_UM  Ecart_Type_UM
 Condition                           
-MA               11.2       0.836660
-Normal           14.0       0.000000
-PLI              13.0       0.000000
-SNR_WGN           8.0       3.807887
+MA                3.4       0.547723
+Normal            3.0       0.000000
+PLI               4.0       0.000000
+SNR_WGN           2.0       1.000000
 
 ========================================
 
 --- TABLE DE L'ANOVA ---
-              sum_sq    df         F    PR(>F)
-C(Condition)  104.15   3.0  9.135965  0.000932
-Residual       60.80  16.0       NaN       NaN
+              sum_sq    df          F    PR(>F)
+C(Condition)    10.6   3.0  10.871795  0.000386
+Residual         5.2  16.0        NaN       NaN
 
 ========================================
 
@@ -22,10 +22,10 @@ Residual       60.80  16.0       NaN       NaN
 =====================================================
 group1  group2 meandiff p-adj   lower   upper  reject
 -----------------------------------------------------
-    MA  Normal      2.8 0.1467 -0.7273  6.3273  False
-    MA     PLI      1.8 0.4827 -1.7273  5.3273  False
-    MA SNR_WGN     -3.2 0.0824 -6.7273  0.3273  False
-Normal     PLI     -1.0 0.8483 -4.5273  2.5273  False
-Normal SNR_WGN     -6.0 0.0009 -9.5273 -2.4727   True
-   PLI SNR_WGN     -5.0 0.0046 -8.5273 -1.4727   True
+    MA  Normal     -0.4 0.6891 -1.4316  0.6316  False
+    MA     PLI      0.6 0.3734 -0.4316  1.6316  False
+    MA SNR_WGN     -1.4 0.0065 -2.4316 -0.3684   True
+Normal     PLI      1.0 0.0591 -0.0316  2.0316  False
+Normal SNR_WGN     -1.0 0.0591 -2.0316  0.0316  False
+   PLI SNR_WGN     -2.0 0.0002 -3.0316 -0.9684   True
 -----------------------------------------------------
