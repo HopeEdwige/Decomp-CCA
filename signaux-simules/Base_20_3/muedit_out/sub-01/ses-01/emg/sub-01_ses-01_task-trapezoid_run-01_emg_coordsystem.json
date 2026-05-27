@@ -1,5 +1,0 @@
-{
-  "EMGCoordinateSystem": "Other",
-  "EMGCoordinateUnits": "mm",
-  "EMGCoordinateSystemDescription": "2D Grid coordinates where X/Y are derived from row/column indices multiplied by inter-electrode distance."
-}
