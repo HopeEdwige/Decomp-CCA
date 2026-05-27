@@ -106,3 +106,20 @@ plt.tight_layout()
 
 # Affichage du graphique
 plt.show()
+
+# ==============================================================================
+# 6. EXPORT DU RAPPORT DE SYNTHÈSE (Console)
+# ==============================================================================
+print("\n" + "="*50)
+print("=== RAPPORT DE SYNTHÈSE DES PERFORMANCES ===")
+print("="*50)
+
+# Calcul des moyennes et écarts-types par condition et par algorithme
+resume_stats = df.groupby(['Condition', 'Algorithme'])['MUs_Trouvees'].agg(['mean', 'std']).round(2)
+
+# Renommer les colonnes pour que ce soit propre
+resume_stats.columns = ['Moyenne_UM', 'Ecart_Type_UM']
+
+print("\n--- STATISTIQUES DESCRIPTIVES ---")
+print(resume_stats.to_string())
+print("\n" + "="*50 + "\n")

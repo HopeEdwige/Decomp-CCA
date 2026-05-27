@@ -11,14 +11,15 @@ from statsmodels.formula.api import ols
 # Données basées sur tes fichiers CSV réels pour MUedit (ICA) et sCCA (Labo)
 data_muedit = {
     'Condition': (['Normal']*5) + (['PLI']*5) + (['MA']*5) + (['SNR_WGN']*5),
-    'MUs_Retrouvees': [3, 3, 3, 3, 3] + [4, 4, 4, 4, 4] + [4, 3, 3, 3, 4] + [1, 1, 2, 3, 3],
+    'MUs_Retrouvees': [47, 47, 47, 47, 47]+ [47, 47, 47, 47, 47] + [43, 42, 47, 45, 42] + [12, 6, 9, 12, 21],
     'Algorithme': ['ICA (MUedit)'] * 20
 }
+
 df_muedit = pd.DataFrame(data_muedit)
 
 data_scca = {
     'Condition': (['Normal']*5) + (['PLI']*5) + (['MA']*5) + (['SNR_WGN']*5),
-    'MUs_Retrouvees': [3, 3, 3, 3, 3] + [4, 4, 4, 4, 4] + [4, 3, 3, 3, 4] + [1, 1, 2, 3, 3],
+    'MUs_Retrouvees': [14, 14, 14, 14, 14] + [13, 13, 13, 13, 13] + [12, 11, 12, 10, 11] + [4, 6, 6, 13, 11],
     'Algorithme': ['sCCA (Labo)'] * 20
 }
 df_scca = pd.DataFrame(data_scca)

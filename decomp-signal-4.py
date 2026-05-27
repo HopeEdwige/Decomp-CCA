@@ -24,7 +24,7 @@ def CCAdecomp(sig, taux):
     w_x = np.linalg.solve(R_x, U)
     return sources, w_x, S
 
-def sCCA_denoise(sig, fs=10000, f0=50.0, taux=1):
+def sCCA_denoise(sig, fs=2048, f0=50.0, taux=1):
     sig_mean = sig.mean(axis=1, keepdims=True)
     x_c = sig - sig_mean
     x_d = x_c[:, :-taux]
@@ -115,7 +115,7 @@ class CCAMainWindow(QMainWindow):
         lbl_fs = QLabel("Fréq. Échantillonnage (Hz) :")
         self.spin_fs = QSpinBox()
         self.spin_fs.setRange(100, 20000)
-        self.spin_fs.setValue(10000) # AJUSTÉ PAR DÉFAUT POUR TA BASE SYNCHRO (10kHz)
+        self.spin_fs.setValue(2048) # AJUSTÉ PAR DÉFAUT POUR TA BASE SYNCHRO (10kHz)
         self.spin_fs.setSingleStep(1000)
 
         layout_l1.addWidget(self.btn_load)
