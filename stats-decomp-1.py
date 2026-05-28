@@ -8,13 +8,13 @@ from statsmodels.formula.api import ols
 from statsmodels.stats.multicomp import pairwise_tukeyhsd
 
 # =========================================================================
-# 1. SAISIE MANUELLE DE TES RÉSULTATS (À mettre à jour après tes décompositions)
+# 1. SAISIE MANUELLE DE TES RÉSULTATS DE DECOMPOSITION (NOMBRE D'UM RETROUVÉES)
 # =========================================================================
 # Rentre ici les 5 valeurs du nombre d'unités motrices (UM) lues dans Decomp
-MUs_Normal = [3, 3, 3, 3, 3]  # Groupe Contrôle (Signal pur de SYNCHRO)
-MUs_PLI    = [4, 4, 4, 4, 4]  # Interférence ligne électrique (50Hz + harmoniques)
-MUs_MA     = [4, 3, 3, 3, 4]  # Artefact de mouvement involontaire (dérive + secousse)
-MUs_SNR    = [1, 1, 2, 3, 3]  # Dégradation par bruit blanc (SNR : 3, 5, 11, 15, 20 dB)
+MUs_Normal = [6, 6, 6, 6, 6]  # Groupe Contrôle (Signal pur de SYNCHRO)
+MUs_PLI    = [6, 6, 6, 6, 6]  # Interférence ligne électrique (50Hz + harmoniques)
+MUs_MA     = [9, 10, 9, 11, 7]  # Artefact de mouvement involontaire (dérive + secousse)
+MUs_SNR    = [0, 0, 0, 1, 1]  # Dégradation par bruit blanc (SNR : 3, 5, 11, 15, 20 dB)
 
 # =========================================================================
 # 2. STRUCTURATION ET PREPARATION DU TABLEAU DE DONNÉES (DATAFRAME)
