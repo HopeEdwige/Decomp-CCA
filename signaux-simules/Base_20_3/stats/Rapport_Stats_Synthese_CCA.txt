@@ -1,0 +1,31 @@
+=== RAPPORT DE SYNTHÈSE DES DECOMPOSITIONS Decomp ===
+
+--- STATISTIQUES DESCRIPTIVES ---
+           Moyenne_UM  Ecart_Type_UM
+Condition                           
+MA               21.4       3.646917
+Normal           28.0       0.000000
+PLI              28.0       0.000000
+SNR_WGN          41.4       6.804410
+
+========================================
+
+--- TABLE DE L'ANOVA ---
+              sum_sq    df         F    PR(>F)
+C(Condition)  1057.8   3.0  23.66443  0.000004
+Residual       238.4  16.0       NaN       NaN
+
+========================================
+
+--- TEST POST-HOC DE TUKEY (alpha=0.05) ---
+ Multiple Comparison of Means - Tukey HSD, FWER=0.05 
+=====================================================
+group1  group2 meandiff p-adj   lower   upper  reject
+-----------------------------------------------------
+    MA  Normal      6.6 0.0674 -0.3846 13.5846  False
+    MA     PLI      6.6 0.0674 -0.3846 13.5846  False
+    MA SNR_WGN     20.0    0.0 13.0154 26.9846   True
+Normal     PLI      0.0    1.0 -6.9846  6.9846  False
+Normal SNR_WGN     13.4 0.0003  6.4154 20.3846   True
+   PLI SNR_WGN     13.4 0.0003  6.4154 20.3846   True
+-----------------------------------------------------

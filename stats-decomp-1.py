@@ -73,7 +73,7 @@ with open("Rapport_Stats_Synthese.txt", "a", encoding="utf-8") as f:
 # 5. TEST POST-HOC (TUKEY HSD - Comparaisons par paires)
 # =========================================================================
 # L'ANOVA dit s'il y a une différence globale. Le test de Tukey (HSD) compare 
-# les conditions 2 à 2 pour identifier précisément où se trouvent les écarts signifCCAtifs.
+# les conditions 2 à 2 pour identifier précisément où se trouvent les écarts significatifs.
 print("--- TEST POST-HOC DE TUKEY ---")
 tukey = pairwise_tukeyhsd(endog=df['MUs_Retrouvees'], groups=df['Condition'], alpha=0.05)
 print(tukey)
