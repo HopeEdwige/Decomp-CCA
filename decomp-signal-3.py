@@ -54,9 +54,10 @@ def sCCA_denoise(sig, fs=2048, f0=50.0, taux=1):
     outliers = np.where(pli_powers > upper_bound)[0]
 
     sources_clean = sources.copy()
-    b, a = iirnotch(f0, Q=30.0, fs=fs)
+    
+    # Méthode d'annulation (Zeroing) pour éviter les distorsions de phase
     for out in outliers:
-        sources_clean[out] = filtfilt(b, a, sources[out])
+        sources_clean[out] = np.zeros_like(sources_clean[out])
 
     sig_recon_d = A @ sources_clean
     final_sig = np.zeros_like(sig)
@@ -77,8 +78,8 @@ def detect_spikes(source, std_multiplier=4.0, min_distance=20):
 class CCAMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("CCA Explorer - Décodage MUs (Spatiotemporel & Spectral)")
-        self.resize(1450, 950)
+        self.setWindowTitle("CCA Explorer - Décodage MUs & Déduplication (Rectus Femoris)")
+        self.resize(1500, 950)
         
         self.signal = None
         self.sources = None
@@ -92,8 +93,8 @@ class CCAMainWindow(QMainWindow):
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
 
-        # --- Ligne 1 : Chargement et sCCA ---
-        control_layout_1 = QHBoxLayout()
+        # --- LIGNE 1 : Import & Traitement lourd ---
+        layout_l1 = QHBoxLayout()
         self.btn_load = QPushButton("📂 Charger fichier")
         self.btn_load.clicked.connect(self.open_file)
         
@@ -111,48 +112,69 @@ class CCAMainWindow(QMainWindow):
         self.spin_taux.setRange(1, 500)
         self.spin_taux.setValue(1)
 
-        control_layout_1.addWidget(self.btn_load)
-        control_layout_1.addWidget(self.btn_scca)
-        control_layout_1.addWidget(self.btn_run_cca)
-        control_layout_1.addWidget(lbl_taux)
-        control_layout_1.addWidget(self.spin_taux)
-        control_layout_1.addStretch()
-
-        # --- Ligne 2 : Filtrage Multi-critères ---
-        control_layout_2 = QHBoxLayout()
-
-        lbl_fs = QLabel("Fréq. (Hz) :")
+        lbl_fs = QLabel("Fréq. Échantillonnage (Hz) :")
         self.spin_fs = QSpinBox()
-        self.spin_fs.setRange(100, 10000)
-        self.spin_fs.setValue(2048) 
-        self.spin_fs.setSingleStep(100)
+        self.spin_fs.setRange(100, 20000)
+        self.spin_fs.setValue(2048) # AJUSTÉ PAR DÉFAUT POUR TA BASE SYNCHRO (10kHz)
+        self.spin_fs.setSingleStep(1000)
 
-        self.btn_spikes = QPushButton("🎯 Extraire les Vraies MUs")
+        layout_l1.addWidget(self.btn_load)
+        layout_l1.addWidget(self.btn_scca)
+        layout_l1.addWidget(self.btn_run_cca)
+        layout_l1.addWidget(lbl_taux)
+        layout_l1.addWidget(self.spin_taux)
+        layout_l1.addSpacing(20)
+        layout_l1.addWidget(lbl_fs)
+        layout_l1.addWidget(self.spin_fs)
+        layout_l1.addStretch()
+
+        # --- LIGNE 2 : Filtres de Détection (Biologiques) ---
+        layout_l2 = QHBoxLayout()
+        self.btn_spikes = QPushButton("🎯 Extraire & Dédupliquer MUs")
         self.btn_spikes.clicked.connect(self.run_spike_detection)
         self.btn_spikes.setEnabled(False)
         self.btn_spikes.setStyleSheet("background-color: #d1e7dd; font-weight: bold;")
 
-        lbl_std = QLabel("Seuil (xStd) :")
+        lbl_std = QLabel("Seuil Ampl. (xStd) :")
         self.spin_std = QDoubleSpinBox()
         self.spin_std.setRange(1.0, 10.0)
-        self.spin_std.setValue(4.0)
+        self.spin_std.setValue(4.0) # Standard optimal
         self.spin_std.setSingleStep(0.5)
 
         lbl_cov = QLabel("CoV Max (%) :")
         self.spin_cov = QDoubleSpinBox()
         self.spin_cov.setRange(5.0, 100.0)
-        self.spin_cov.setValue(30.0) 
+        self.spin_cov.setValue(30.0) # Standard physiologique activé par défaut
         self.spin_cov.setSingleStep(5.0)
 
-        # NOUVEAU CONTROLE : Filtrage Spectral
-        lbl_spec = QLabel("Énergie MU Min (%) :")
-        lbl_spec.setToolTip("Pourcentage minimum d'énergie concentré dans la bande musculaire (70-400Hz)")
+        lbl_spec = QLabel("Énergie Spectrale Min (%) :")
         self.spin_spec = QDoubleSpinBox()
         self.spin_spec.setRange(0.0, 100.0)
-        self.spin_spec.setValue(30.0) # On demande au moins 30% d'énergie dans les hautes fréquences
+        self.spin_spec.setValue(30.0) # Bande EMG active par défaut
         self.spin_spec.setSingleStep(5.0)
 
-        self.btn_export_csv = QPushButton("📊 Export CSV")
+        layout_l2.addWidget(self.btn_spikes)
+        layout_l2.addWidget(lbl_std)
+        layout_l2.addWidget(self.spin_std)
+        layout_l2.addSpacing(15)
+        layout_l2.addWidget(lbl_cov)
+        layout_l2.addWidget(self.spin_cov)
+        layout_l2.addSpacing(15)
+        layout_l2.addWidget(lbl_spec)
+        layout_l2.addWidget(self.spin_spec)
+        layout_l2.addStretch()
+
+        # --- LIGNE 3 : Déduplication et Export ---
+        layout_l3 = QHBoxLayout()
+        
+        lbl_sync = QLabel("Taux de Coïncidence Max (Déduplication %) :")
+        lbl_sync.setStyleSheet("color: #856404; font-weight: bold;")
+        self.spin_sync = QDoubleSpinBox()
+        self.spin_sync.setRange(5.0, 100.0)
+        self.spin_sync.setValue(30.0) 
+        self.spin_sync.setSingleStep(5.0)
+
+        self.btn_export_csv = QPushButton("📊 Export CSV (Stats)")
         self.btn_export_csv.clicked.connect(self.export_stats_csv)
         self.btn_export_csv.setEnabled(False)
         self.btn_export_csv.setStyleSheet("background-color: #fff3cd;")
@@ -161,39 +183,33 @@ class CCAMainWindow(QMainWindow):
         self.btn_export_img.clicked.connect(self.export_as_image)
         self.btn_export_img.setEnabled(False)
         self.btn_export_img.setStyleSheet("background-color: #cff4fc;")
-        
-        control_layout_2.addWidget(lbl_fs)
-        control_layout_2.addWidget(self.spin_fs)
-        control_layout_2.addSpacing(15)
-        control_layout_2.addWidget(self.btn_spikes)
-        control_layout_2.addWidget(lbl_std)
-        control_layout_2.addWidget(self.spin_std)
-        control_layout_2.addWidget(lbl_cov)
-        control_layout_2.addWidget(self.spin_cov)
-        control_layout_2.addWidget(lbl_spec)
-        control_layout_2.addWidget(self.spin_spec)
-        control_layout_2.addSpacing(15)
-        control_layout_2.addWidget(self.btn_export_csv)
-        control_layout_2.addWidget(self.btn_export_img)
-        control_layout_2.addStretch()
 
-        main_layout.addLayout(control_layout_1)
-        main_layout.addLayout(control_layout_2)
+        layout_l3.addWidget(lbl_sync)
+        layout_l3.addWidget(self.spin_sync)
+        layout_l3.addStretch()
+        layout_l3.addWidget(self.btn_export_csv)
+        layout_l3.addWidget(self.btn_export_img)
 
+        main_layout.addLayout(layout_l1)
+        main_layout.addLayout(layout_l2)
+        main_layout.addLayout(layout_l3)
+
+        # --- Bandeau Statistique ---
         self.stats_layout = QHBoxLayout()
-        self.lbl_mu_count = QLabel("MUs validées (Temps + Fréquences) : <b>-</b>")
+        self.lbl_mu_count = QLabel("MUs Uniques Validées : <b>-</b>")
         self.lbl_mu_count.setStyleSheet("font-size: 13pt; color: #0f5132; padding: 5px; background-color: #e2f0d9; border-radius: 4px;")
         self.stats_layout.addWidget(self.lbl_mu_count)
         self.stats_layout.addStretch()
         main_layout.addLayout(self.stats_layout)
 
+        # --- Graphiques ---
         pg.setConfigOption('background', 'w')
         pg.setConfigOption('foreground', 'k')
 
-        self.plot_raw = pg.PlotWidget(title="Signaux Importés")
+        self.plot_raw = pg.PlotWidget(title="Signaux Importés (ou Nettoyés sCCA)")
         main_layout.addWidget(self.plot_raw)
 
-        self.plot_sources = pg.PlotWidget(title="Sources CCA (Rouge = MU Validée [Temps & Spectre], Gris = Bruit/Artéfact)")
+        self.plot_sources = pg.PlotWidget(title="Sources CCA (Rouge = Vraie MU Unique, Gris = Bruit ou Doublon rejeté)")
         main_layout.addWidget(self.plot_sources)
 
     def _find_largest_numeric_2d(self, mat_data):
@@ -246,11 +262,9 @@ class CCAMainWindow(QMainWindow):
                 self.btn_export_img.setEnabled(False)
                 self.btn_export_csv.setEnabled(False)
                 self.sources = None
-                self.lbl_mu_count.setText("MUs validées (Temps + Fréquences) : <b>-</b>")
+                self.lbl_mu_count.setText("MUs Uniques Validées : <b>-</b>")
                 self.plot_raw_signals()
                 self.plot_sources.clear()
-            else:
-                QMessageBox.warning(self, "Avertissement", "Aucune matrice de signal valide trouvée.")
         except Exception as e:
             QMessageBox.critical(self, "Erreur", f"Impossible de lire le fichier :\n{str(e)}")
 
@@ -269,7 +283,7 @@ class CCAMainWindow(QMainWindow):
             clean_signal, outliers = sCCA_denoise(self.signal, fs=fs, f0=50.0, taux=self.spin_taux.value())
             self.signal = clean_signal 
             self.plot_raw_signals()    
-            QMessageBox.information(self, "sCCA Terminé", f"{len(outliers)} source(s) polluée(s) par le 50Hz filtrées.")
+            QMessageBox.information(self, "sCCA Terminé", f"{len(outliers)} source(s) polluée(s) par le 50Hz isolée(s) et annulée(s) via IQR.")
         except Exception as e:
             QMessageBox.critical(self, "Erreur", str(e))
         finally:
@@ -293,32 +307,30 @@ class CCAMainWindow(QMainWindow):
         self.plot_sources.clear()
         self.mu_stats = [] 
         
-        colors = ['#D95319', '#EDB120', '#7E2F8E', '#77AC30']
+        fs = self.spin_fs.value() 
         std_multiplier = self.spin_std.value()
         cov_threshold = self.spin_cov.value()
-        spec_threshold = self.spin_spec.value() # Nouveau : Seuil Spectral
-        fs = self.spin_fs.value() 
+        spec_threshold = self.spin_spec.value() 
+        sync_threshold = self.spin_sync.value() / 100.0 
         
-        mu_detected_count = 0  
+        candidates = []
+        colors = ['#D95319', '#EDB120', '#7E2F8E', '#77AC30']
         
         for i in range(self.sources.shape[0]):
-            color = colors[i % len(colors)]
             source = self.sources[i]
-            shifted_source = source + (i * self.source_offset)
+            peaks, _ = detect_spikes(source, std_multiplier=std_multiplier)
             
-            self.plot_sources.plot(shifted_source, pen=pg.mkPen(color=color, width=1.2))
-            peaks, threshold = detect_spikes(source, std_multiplier=std_multiplier)
+            is_valid_candidate = False
+            cov_isi = 1000 
+            firing_rate_hz = 0
+            mu_spectral_ratio = 0
             
-            is_valid_mu = False
-            
-            # --- 1. FILTRE SPECTRAL (Type sCCA pour MUs) ---
             f, Pxx = welch(source, fs=fs, nperseg=1024)
-            # Bande d'intérêt MU (ex: 70 Hz à 400 Hz)
             mu_band_power = np.sum(Pxx[(f >= 70) & (f <= 400)])
             total_power = np.sum(Pxx)
-            mu_spectral_ratio = (mu_band_power / total_power) * 100 if total_power > 0 else 0
-            
-            # --- 2. FILTRE TEMPOREL (CoV ISI) ---
+            if total_power > 0:
+                mu_spectral_ratio = (mu_band_power / total_power) * 100
+                
             if len(peaks) >= 4 and mu_spectral_ratio >= spec_threshold:
                 isi_samples = np.diff(peaks) 
                 median_isi = np.median(isi_samples)
@@ -326,39 +338,71 @@ class CCAMainWindow(QMainWindow):
                 
                 if len(valid_isi_samples) >= 3:
                     cov_isi = (np.std(valid_isi_samples) / np.mean(valid_isi_samples)) * 100
-                    
                     if cov_isi <= cov_threshold:
-                        is_valid_mu = True
-                        mu_detected_count += 1
+                        is_valid_candidate = True
                         mean_isi_sec = np.mean(valid_isi_samples) / fs
                         firing_rate_hz = 1.0 / mean_isi_sec
-                        
-                        self.mu_stats.append({
-                            "MU_Index": i + 1,
-                            "Nb_Spikes": len(peaks),
-                            "Mean_ISI_ms": mean_isi_sec * 1000,
-                            "Firing_Rate_Hz": firing_rate_hz,
-                            "CoV_ISI_%": cov_isi,
-                            "Energie_MU_Bande_%": mu_spectral_ratio # Ajout au CSV !
-                        })
             
-            if is_valid_mu:
-                scatter = pg.ScatterPlotItem(
-                    x=peaks, y=shifted_source[peaks], size=8, 
-                    pen=pg.mkPen(None), brush=pg.mkBrush(255, 0, 0, 200)
-                )
+            candidates.append({
+                "idx": i,
+                "peaks": peaks,
+                "is_valid": is_valid_candidate,
+                "cov": cov_isi,
+                "fr_hz": firing_rate_hz,
+                "spec_ratio": mu_spectral_ratio,
+                "is_duplicate": False 
+            })
+
+        tolerance_samples = int((fs / 1000.0) * 1.5) 
+        
+        for i in range(len(candidates)):
+            if not candidates[i]["is_valid"] or candidates[i]["is_duplicate"]: continue
+            for j in range(i + 1, len(candidates)):
+                if not candidates[j]["is_valid"] or candidates[j]["is_duplicate"]: continue
+                
+                peaks_i = candidates[i]["peaks"]
+                peaks_j = candidates[j]["peaks"]
+                
+                common_spikes = 0
+                for p_i in peaks_i:
+                    if np.any(np.abs(peaks_j - p_i) <= tolerance_samples):
+                        common_spikes += 1
+                
+                max_ratio = common_spikes / min(len(peaks_i), len(peaks_j))
+                if max_ratio > sync_threshold:
+                    if candidates[i]["cov"] > candidates[j]["cov"]:
+                        candidates[i]["is_duplicate"] = True
+                        break 
+                    else:
+                        candidates[j]["is_duplicate"] = True
+
+        mu_detected_count = 0
+        for cand in candidates:
+            idx = cand["idx"]
+            color = colors[idx % len(colors)]
+            shifted_source = self.sources[idx] + (idx * self.source_offset)
+            self.plot_sources.plot(shifted_source, pen=pg.mkPen(color=color, width=1.2))
+            peaks = cand["peaks"]
+            
+            if cand["is_valid"] and not cand["is_duplicate"]:
+                mu_detected_count += 1
+                self.mu_stats.append({
+                            "MU_Index": idx + 1,
+                            "Nb_Spikes": len(peaks),
+                            "Firing_Rate_Hz": cand["fr_hz"],
+                            "CoV_ISI_%": cand["cov"],
+                            "Energie_MU_%": cand["spec_ratio"]
+                        })
+                scatter = pg.ScatterPlotItem(x=peaks, y=shifted_source[peaks], size=8, pen=pg.mkPen(None), brush=pg.mkBrush(255, 0, 0, 200))
             elif len(peaks) > 0:
-                scatter = pg.ScatterPlotItem(
-                    x=peaks, y=shifted_source[peaks], size=5, 
-                    pen=pg.mkPen(None), brush=pg.mkBrush(150, 150, 150, 150)
-                )
+                scatter = pg.ScatterPlotItem(x=peaks, y=shifted_source[peaks], size=5, pen=pg.mkPen(None), brush=pg.mkBrush(150, 150, 150, 150))
             
             if len(peaks) > 0:
                 self.plot_sources.addItem(scatter)
         
-        self.lbl_mu_count.setText(f"MUs validées (Temps + Fréquences) : <b>{mu_detected_count}</b>")
+        self.lbl_mu_count.setText(f"MUs Uniques Validées : <b>{mu_detected_count}</b>")
         if mu_detected_count > 0: self.btn_export_csv.setEnabled(True) 
-        QMessageBox.information(self, "Analyse Terminée", f"{mu_detected_count} Unités Motrices validées par les filtres CoV et Spectral.")
+        QMessageBox.information(self, "Analyse Terminée", f"Traitement complet terminé.\nIl reste {mu_detected_count} MUs uniques et biologiquement valides.")
 
     def export_stats_csv(self):
         if not self.mu_stats: return
