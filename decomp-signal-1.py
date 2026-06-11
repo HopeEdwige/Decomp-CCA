@@ -1,9 +1,34 @@
 import sys
+import os
+import site
 import numpy as np
 import pandas as pd
 import h5py
 from scipy.io import loadmat
 from scipy.signal import find_peaks
+
+if sys.platform.startswith('win'):
+    qt_paths = []
+    if hasattr(site, 'getsitepackages'):
+        qt_paths.extend(site.getsitepackages())
+    qt_paths.append(site.getusersitepackages())
+    qt_paths.extend(sys.path)
+    for base in qt_paths:
+        if not base:
+            continue
+        qt_bin = os.path.join(base, 'PyQt5', 'Qt5', 'bin')
+        qt_plugins = os.path.join(base, 'PyQt5', 'Qt5', 'plugins')
+        if os.path.isdir(qt_bin):
+            try:
+                os.add_dll_directory(qt_bin)
+            except AttributeError:
+                pass
+            os.environ['PATH'] = qt_bin + os.pathsep + os.environ.get('PATH', '')
+        if os.path.isdir(qt_plugins):
+            os.environ['QT_QPA_PLATFORM_PLUGIN_PATH'] = qt_plugins
+        if os.path.isdir(qt_bin) or os.path.isdir(qt_plugins):
+            break
+
 import pyqtgraph as pg
 import pyqtgraph.exporters  # REQUIS pour l'exportation d'images
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, QHBoxLayout, 
