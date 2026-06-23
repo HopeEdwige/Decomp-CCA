@@ -303,7 +303,7 @@ class CCAMainWindow(QMainWindow):
             f, Pxx = welch(source, fs=fs, nperseg=1024)
             mu_spec = (np.sum(Pxx[(f >= 70) & (f <= 400)]) / np.sum(Pxx)) * 100 if np.sum(Pxx)>0 else 0
                 
-            if len(peaks) >= 4 and mu_spec >= self.spin_spec.value():
+            if len(peaks) >= 40 and mu_spec >= self.spin_spec.value():
                 isi = np.diff(peaks) 
                 valid_isi = isi[(isi > 0.5 * np.median(isi)) & (isi < 1.5 * np.median(isi))]
                 if len(valid_isi) >= 3:
