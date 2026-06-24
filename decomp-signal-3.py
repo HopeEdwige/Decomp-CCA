@@ -40,41 +40,37 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, QHBoxLayout
 
 def CCAdecomp(sig, taux):
     """ LA FONCTION EXACTE DU SUPERVISEUR """
-    # 1. Remove mean over time (axis=1)
     sig = sig - sig.mean(axis=1, keepdims=True)
-
-    # 2. Build delayed versions
     x = sig[:, :-taux]
-    y = sig[:, taux:]   # shifted version (correct alignment)
-
-    # 3. QR decompositions (on transposed to get same behavior)
-    Q_x, R_x = np.linalg.qr(x.T, mode='reduced')  # Q_x: (n_samples-taux, n_channels)
+    y = sig[:, taux:]   
+    Q_x, R_x = np.linalg.qr(x.T, mode='reduced')  
     Q_y, R_y = np.linalg.qr(y.T, mode='reduced')
-
-    # 4. Singular Value Decomposition
     U, S, Vt = np.linalg.svd(Q_x.T @ Q_y, full_matrices=False)
-
-    # 5. Canonical sources and correlations
-    sources = (Q_x @ U).T          # shape (n_components, n_samples - taux)
-    autocor = S                    # canonical correlations (singular values)
-
-    # 6. Spatial filters (weights)
-    w_x = np.linalg.solve(R_x, U)  # shape (n_channels, n_components)
-
+    sources = (Q_x @ U).T          
+    autocor = S                    
+    w_x = np.linalg.solve(R_x, U)  
     return sources, w_x, autocor
 
 def preprocess_signal(sig, fs=2048.0, f0=50.0):
     """ Filtres Physiologiques (Passe-bande 20-500Hz + Notch 50Hz) """
     sig_mean = sig.mean(axis=1, keepdims=True)
     x_c = sig - sig_mean
-
     high_freq = min(500.0, (fs / 2) - 1)
     b_band, a_band = butter(4, [20.0 / (fs / 2), high_freq / (fs / 2)], btype='band')
     x_filt = filtfilt(b_band, a_band, x_c, axis=1)
-
     b_notch, a_notch = iirnotch(f0, 30.0, fs)
     x_filt = filtfilt(b_notch, a_notch, x_filt, axis=1)
     return x_filt
+
+def extend_signal(sig, extension_factor=5):
+    """ Extension spatio-temporelle (Le booster de séparation) """
+    if extension_factor <= 1:
+        return sig
+    nb_channels, nb_samples = sig.shape
+    extended_sig = np.zeros((nb_channels * extension_factor, nb_samples - extension_factor + 1))
+    for i in range(extension_factor):
+        extended_sig[i*nb_channels : (i+1)*nb_channels, :] = sig[:, i : nb_samples - extension_factor + 1 + i]
+    return extended_sig
 
 def detect_spikes_kmeans(source, fs=2048.0, min_distance_ms=10.0):
     """ Binarisation K-Means avec calcul du PNR (Métrique MUedit) """
@@ -115,7 +111,7 @@ def detect_spikes_kmeans(source, fs=2048.0, min_distance_ms=10.0):
 class CCAMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("CCA Explorer - Décodage MUs (Standard MUedit / PNR)")
+        self.setWindowTitle("CCA Explorer - Décodage MUs (Standard MUedit / PNR / Extension)")
         self.resize(1600, 950)
         
         self.signal = None
@@ -143,6 +139,12 @@ class CCAMainWindow(QMainWindow):
         self.btn_run_cca.setEnabled(False)
         self.btn_run_cca.setStyleSheet("font-weight: bold;")
         
+        # NOUVEAU : FACTEUR D'EXTENSION
+        lbl_ext = QLabel("Facteur d'Extension :")
+        self.spin_ext = QSpinBox()
+        self.spin_ext.setRange(1, 20)
+        self.spin_ext.setValue(5)
+
         lbl_taux = QLabel("Taux CCA :")
         self.spin_taux = QSpinBox()
         self.spin_taux.setRange(1, 500)
@@ -156,9 +158,13 @@ class CCAMainWindow(QMainWindow):
 
         layout_l1.addWidget(self.btn_load)
         layout_l1.addWidget(self.btn_run_cca)
+        layout_l1.addSpacing(15)
+        layout_l1.addWidget(lbl_ext)
+        layout_l1.addWidget(self.spin_ext)
+        layout_l1.addSpacing(15)
         layout_l1.addWidget(lbl_taux)
         layout_l1.addWidget(self.spin_taux)
-        layout_l1.addSpacing(20)
+        layout_l1.addSpacing(15)
         layout_l1.addWidget(lbl_fs)
         layout_l1.addWidget(self.spin_fs)
         layout_l1.addStretch()
@@ -170,11 +176,10 @@ class CCAMainWindow(QMainWindow):
         self.btn_spikes.setEnabled(False)
         self.btn_spikes.setStyleSheet("background-color: #d1e7dd; font-weight: bold;")
 
-        # NOUVEAU REGLAGE PNR
         lbl_pnr = QLabel("PNR Min (dB) :")
         self.spin_pnr = QDoubleSpinBox()
         self.spin_pnr.setRange(0.0, 50.0)
-        self.spin_pnr.setValue(12.0) # 12 dB est une excellente valeur de base
+        self.spin_pnr.setValue(12.0) # Ajuste cette valeur si tu as trop/pas assez d'UMs
 
         lbl_cov = QLabel("CoV Max (%) :")
         self.spin_cov = QDoubleSpinBox()
@@ -298,8 +303,11 @@ class CCAMainWindow(QMainWindow):
             # 1. Filtre Physiologique
             filt_signal = preprocess_signal(self.signal, fs=self.spin_fs.value())
             
-            # 2. CCA du Superviseur
-            self.sources, w_x, self.autocor = CCAdecomp(filt_signal, self.spin_taux.value())
+            # 2. Extension Spatio-Temporelle (RÉTABLIE !)
+            ext_signal = extend_signal(filt_signal, extension_factor=self.spin_ext.value())
+            
+            # 3. CCA du Superviseur (sur le signal étendu)
+            self.sources, w_x, self.autocor = CCAdecomp(ext_signal, self.spin_taux.value())
             
             self.plot_sources.clear()
             self.source_offset = np.max(np.abs(self.sources)) * 1.5
@@ -322,7 +330,6 @@ class CCAMainWindow(QMainWindow):
         for i in range(self.sources.shape[0]):
             source = self.sources[i]
             
-            # 3. K-MEANS + Récupération du PNR
             peaks, threshold, pnr = detect_spikes_kmeans(source, fs=fs)
             
             is_valid = False
@@ -332,7 +339,7 @@ class CCAMainWindow(QMainWindow):
             f, Pxx = welch(source, fs=fs, nperseg=1024)
             mu_spec = (np.sum(Pxx[(f >= 70) & (f <= 400)]) / np.sum(Pxx)) * 100 if np.sum(Pxx)>0 else 0
             
-            # LE FILTRE FINAL : 15 pics min, Énergie OK, et PNR supérieur au réglage de l'interface
+            # LE FILTRE FINAL : 15 pics min, Énergie OK, et PNR OK
             if len(peaks) >= 15 and mu_spec >= self.spin_spec.value() and pnr >= self.spin_pnr.value():
                 isi = np.diff(peaks) 
                 valid_isi = isi[(isi > 0.5 * np.median(isi)) & (isi < 1.5 * np.median(isi))]
@@ -344,7 +351,7 @@ class CCAMainWindow(QMainWindow):
             
             candidates.append({"idx": i, "peaks": peaks, "is_valid": is_valid, "cov": cov_isi, "fr": fr_hz, "spec": mu_spec, "pnr": pnr, "dup": False, "threshold": threshold})
 
-        # Déduplication (pour éliminer les clones créés par la CCA)
+        # Déduplication
         tol = int((fs / 1000.0) * 1.5) 
         sync_th = self.spin_sync.value() / 100.0 
         for i in range(len(candidates)):
@@ -354,7 +361,6 @@ class CCAMainWindow(QMainWindow):
                 pi, pj = candidates[i]["peaks"], candidates[j]["peaks"]
                 common = sum(1 for p in pi if np.any(np.abs(pj - p) <= tol))
                 if (common / min(len(pi), len(pj))) > sync_th:
-                    # On garde l'unité qui a le meilleur PNR (le moins de bruit)
                     if candidates[i]["pnr"] > candidates[j]["pnr"]: candidates[j]["dup"] = True
                     else: candidates[i]["dup"] = True
 
@@ -376,11 +382,9 @@ class CCAMainWindow(QMainWindow):
                 
                 nom_mu = f"MU_{mu_count}"
                 
-                # ENREGISTREMENTS POUR LES DEUX EXPORTS
                 self.mu_spikes[nom_mu] = peaks                 
                 self.mu_signals[nom_mu] = self.sources[idx]    
                 
-                # STATS (Avec ajout du PNR)
                 self.mu_stats.append({
                     "MU": nom_mu, 
                     "Nb_Spikes": len(peaks), 
@@ -408,7 +412,6 @@ class CCAMainWindow(QMainWindow):
         if not self.mu_signals: return
         options = QFileDialog.Options()
         file_path, _ = QFileDialog.getSaveFileName(self, "Exporter Sources Continues (Courbes)", "", "Fichier CSV (*.csv)", options=options)
-        
         if file_path:
             if not file_path.endswith('.csv'): file_path += '.csv'
             try:
@@ -419,18 +422,14 @@ class CCAMainWindow(QMainWindow):
                 QMessageBox.critical(self, "Erreur", f"Échec de l'exportation :\n{str(e)}")
 
     def export_spikes_csv(self):
-        """ Exportation stricte en format Train de Dirac (0 et 1) """
         if not self.mu_spikes or self.signal is None: return
         options = QFileDialog.Options()
         file_path, _ = QFileDialog.getSaveFileName(self, "Exporter Train de Dirac", "", "Fichier CSV (*.csv)", options=options)
-        
         if file_path:
             if not file_path.endswith('.csv'): file_path += '.csv'
             try:
-                # Longueur exacte du signal original
                 signal_length = self.signal.shape[1] 
                 export_dict = {}
-                
                 for mu_name, spk in self.mu_spikes.items():
                     dirac_train = np.zeros(signal_length, dtype=int)
                     valid_spk = spk[spk < signal_length]
@@ -439,7 +438,6 @@ class CCAMainWindow(QMainWindow):
                 
                 df_spikes = pd.DataFrame(export_dict)
                 df_spikes.to_csv(file_path, index=False, sep=';')
-                
                 QMessageBox.information(self, "Succès", "Train de Dirac exporté avec succès !\nIl est composé uniquement de 0 et de 1, sur toute la longueur du signal.")
             except Exception as e:
                 QMessageBox.critical(self, "Erreur", f"Échec de l'exportation :\n{str(e)}")
