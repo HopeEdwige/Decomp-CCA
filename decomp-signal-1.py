@@ -77,27 +77,40 @@ def preprocess_signal(sig, fs=2048.0, f0=50.0):
     return x_filt
 
 def detect_spikes_kmeans(source, fs=2048.0, min_distance_ms=10.0):
-    """ Binarisation par K-Means (State of the Art - Sans seuil manuel) """
+    """ Binarisation K-Means avec calcul du PNR (Métrique MUedit) """
     signal_sq = source ** 2
     min_distance = int((min_distance_ms / 1000.0) * fs)
     
     peaks_candidats, _ = find_peaks(signal_sq, distance=min_distance)
     
     if len(peaks_candidats) < 5:
-        return np.array([]), 0
+        return np.array([]), 0, 0
 
     valeurs_pics = signal_sq[peaks_candidats].reshape(-1, 1)
     
-    kmeans = KMeans(n_clusters=2, random_state=42, n_init=10).fit(valeurs_pics)
+    # Avant :
+    # kmeans = KMeans(n_clusters=2, random_state=42, n_init=10).fit(valeurs_pics)
+    
+    # MAINTENANT :
+    kmeans = KMeans(n_clusters=3, random_state=42, n_init=10).fit(valeurs_pics)
     classe_spikes = np.argmax(kmeans.cluster_centers_)
     vrais_peaks = peaks_candidats[kmeans.labels_ == classe_spikes]
     
     if len(vrais_peaks) > 0:
         seuil_effectif = np.sqrt(np.min(valeurs_pics[kmeans.labels_ == classe_spikes]))
+        
+        # --- CALCUL DU PNR (Pulse-to-Noise Ratio) ---
+        spikes_power = np.mean(signal_sq[vrais_peaks])
+        mask = np.ones(len(signal_sq), dtype=bool)
+        mask[vrais_peaks] = False
+        noise_power = np.mean(signal_sq[mask])
+        pnr = 10 * np.log10(spikes_power / noise_power) if noise_power > 0 else 0
+        # ---------------------------------------------
     else:
         seuil_effectif = 0
+        pnr = 0
         
-    return vrais_peaks, seuil_effectif
+    return vrais_peaks, seuil_effectif, pnr
 
 # ==========================================
 # 3. INTERFACE GRAPHIQUE PRINCIPALE
@@ -106,15 +119,16 @@ def detect_spikes_kmeans(source, fs=2048.0, min_distance_ms=10.0):
 class CCAMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("CCA Explorer - Décodage MUs & Déduplication (State-of-the-Art)")
-        self.resize(1500, 950)
+        self.setWindowTitle("CCA Explorer - Décodage MUs (Standard MUedit / PNR)")
+        self.resize(1600, 950)
         
         self.signal = None
         self.sources = None
         self.autocor = None
         self.source_offset = 0
         self.mu_stats = []
-        self.mu_spikes = {} 
+        self.mu_spikes = {}   # Pour le Train de Dirac
+        self.mu_signals = {}  # Pour les sources continues
         
         self.initUI()
 
@@ -131,11 +145,12 @@ class CCAMainWindow(QMainWindow):
         self.btn_run_cca = QPushButton("⚡ Décomposition CCA")
         self.btn_run_cca.clicked.connect(self.run_cca)
         self.btn_run_cca.setEnabled(False)
+        self.btn_run_cca.setStyleSheet("font-weight: bold;")
         
         lbl_taux = QLabel("Taux CCA :")
         self.spin_taux = QSpinBox()
         self.spin_taux.setRange(1, 500)
-        self.spin_taux.setValue(1)
+        self.spin_taux.setValue(1) # Recommandé à 1 pour la stabilité
 
         lbl_fs = QLabel("Fréq. Éch. (Hz) :")
         self.spin_fs = QSpinBox()
@@ -152,17 +167,23 @@ class CCAMainWindow(QMainWindow):
         layout_l1.addWidget(self.spin_fs)
         layout_l1.addStretch()
 
-        # --- LIGNE 2 : Filtres Biologiques ---
+        # --- LIGNE 2 : Filtres Biologiques & PNR ---
         layout_l2 = QHBoxLayout()
-        self.btn_spikes = QPushButton("🎯 Extraire & Dédupliquer MUs (K-Means)")
+        self.btn_spikes = QPushButton("🎯 Extraire & Filtrer MUs (K-Means)")
         self.btn_spikes.clicked.connect(self.run_spike_detection)
         self.btn_spikes.setEnabled(False)
         self.btn_spikes.setStyleSheet("background-color: #d1e7dd; font-weight: bold;")
 
+        # NOUVEAU REGLAGE PNR
+        lbl_pnr = QLabel("PNR Min (dB) :")
+        self.spin_pnr = QDoubleSpinBox()
+        self.spin_pnr.setRange(0.0, 50.0)
+        self.spin_pnr.setValue(12.0) # 12 dB est une excellente valeur de base
+
         lbl_cov = QLabel("CoV Max (%) :")
         self.spin_cov = QDoubleSpinBox()
         self.spin_cov.setRange(5.0, 100.0)
-        self.spin_cov.setValue(30.0)
+        self.spin_cov.setValue(35.0)
 
         lbl_spec = QLabel("Énergie Spectrale Min (%) :")
         self.spin_spec = QDoubleSpinBox()
@@ -170,6 +191,10 @@ class CCAMainWindow(QMainWindow):
         self.spin_spec.setValue(30.0)
 
         layout_l2.addWidget(self.btn_spikes)
+        layout_l2.addSpacing(15)
+        layout_l2.addWidget(lbl_pnr)
+        layout_l2.addWidget(self.spin_pnr)
+        layout_l2.addSpacing(15)
         layout_l2.addWidget(lbl_cov)
         layout_l2.addWidget(self.spin_cov)
         layout_l2.addWidget(lbl_spec)
@@ -178,7 +203,7 @@ class CCAMainWindow(QMainWindow):
 
         # --- LIGNE 3 : Déduplication et Export ---
         layout_l3 = QHBoxLayout()
-        lbl_sync = QLabel("Taux de Coïncidence Max (Déduplication %) :")
+        lbl_sync = QLabel("Taux de Coïncidence Max (%) :")
         self.spin_sync = QDoubleSpinBox()
         self.spin_sync.setRange(5.0, 100.0)
         self.spin_sync.setValue(30.0) 
@@ -187,7 +212,12 @@ class CCAMainWindow(QMainWindow):
         self.btn_export_csv.clicked.connect(self.export_stats_csv)
         self.btn_export_csv.setEnabled(False)
 
-        self.btn_export_spikes = QPushButton("📥 Exporter Pics (Spike Trains)")
+        self.btn_export_sources = QPushButton("📈 Exporter Sources Continues")
+        self.btn_export_sources.clicked.connect(self.export_sources_csv)
+        self.btn_export_sources.setEnabled(False)
+        self.btn_export_sources.setStyleSheet("background-color: #d0ebff; font-weight: bold; color: #00509e;")
+
+        self.btn_export_spikes = QPushButton("📥 Exporter Train de Dirac (0 et 1)")
         self.btn_export_spikes.clicked.connect(self.export_spikes_csv)
         self.btn_export_spikes.setEnabled(False)
         self.btn_export_spikes.setStyleSheet("background-color: #e2e3e5; font-weight: bold; color: #052c65;")
@@ -200,6 +230,7 @@ class CCAMainWindow(QMainWindow):
         layout_l3.addWidget(self.spin_sync)
         layout_l3.addStretch()
         layout_l3.addWidget(self.btn_export_csv)
+        layout_l3.addWidget(self.btn_export_sources)
         layout_l3.addWidget(self.btn_export_spikes)
         layout_l3.addWidget(self.btn_export_img)
 
@@ -210,6 +241,7 @@ class CCAMainWindow(QMainWindow):
         # --- Bandeau Statistique ---
         self.stats_layout = QHBoxLayout()
         self.lbl_mu_count = QLabel("MUs Uniques Validées : <b>-</b>")
+        self.lbl_mu_count.setStyleSheet("font-size: 14px; color: #2c3e50;")
         self.stats_layout.addWidget(self.lbl_mu_count)
         self.stats_layout.addStretch()
         main_layout.addLayout(self.stats_layout)
@@ -286,6 +318,7 @@ class CCAMainWindow(QMainWindow):
         self.plot_sources.clear()
         self.mu_stats = []
         self.mu_spikes = {} 
+        self.mu_signals = {} 
         
         fs = self.spin_fs.value() 
         candidates = []
@@ -293,8 +326,8 @@ class CCAMainWindow(QMainWindow):
         for i in range(self.sources.shape[0]):
             source = self.sources[i]
             
-            # 3. K-MEANS (State of the Art) au lieu de l'ancien seuil manuel
-            peaks, threshold = detect_spikes_kmeans(source, fs=fs)
+            # 3. K-MEANS + Récupération du PNR
+            peaks, threshold, pnr = detect_spikes_kmeans(source, fs=fs)
             
             is_valid = False
             cov_isi = 1000 
@@ -302,8 +335,9 @@ class CCAMainWindow(QMainWindow):
             
             f, Pxx = welch(source, fs=fs, nperseg=1024)
             mu_spec = (np.sum(Pxx[(f >= 70) & (f <= 400)]) / np.sum(Pxx)) * 100 if np.sum(Pxx)>0 else 0
-                
-            if len(peaks) >= 40 and mu_spec >= self.spin_spec.value():
+            
+            # LE FILTRE FINAL : 15 pics min, Énergie OK, et PNR supérieur au réglage de l'interface
+            if len(peaks) >= 15 and mu_spec >= self.spin_spec.value() and pnr >= self.spin_pnr.value():
                 isi = np.diff(peaks) 
                 valid_isi = isi[(isi > 0.5 * np.median(isi)) & (isi < 1.5 * np.median(isi))]
                 if len(valid_isi) >= 3:
@@ -312,9 +346,9 @@ class CCAMainWindow(QMainWindow):
                         is_valid = True
                         fr_hz = 1.0 / (np.mean(valid_isi) / fs)
             
-            candidates.append({"idx": i, "peaks": peaks, "is_valid": is_valid, "cov": cov_isi, "fr": fr_hz, "spec": mu_spec, "dup": False, "threshold": threshold})
+            candidates.append({"idx": i, "peaks": peaks, "is_valid": is_valid, "cov": cov_isi, "fr": fr_hz, "spec": mu_spec, "pnr": pnr, "dup": False, "threshold": threshold})
 
-        # Déduplication
+        # Déduplication (pour éliminer les clones créés par la CCA)
         tol = int((fs / 1000.0) * 1.5) 
         sync_th = self.spin_sync.value() / 100.0 
         for i in range(len(candidates)):
@@ -324,8 +358,9 @@ class CCAMainWindow(QMainWindow):
                 pi, pj = candidates[i]["peaks"], candidates[j]["peaks"]
                 common = sum(1 for p in pi if np.any(np.abs(pj - p) <= tol))
                 if (common / min(len(pi), len(pj))) > sync_th:
-                    if candidates[i]["cov"] > candidates[j]["cov"]: candidates[i]["dup"] = True
-                    else: candidates[j]["dup"] = True
+                    # On garde l'unité qui a le meilleur PNR (le moins de bruit)
+                    if candidates[i]["pnr"] > candidates[j]["pnr"]: candidates[j]["dup"] = True
+                    else: candidates[i]["dup"] = True
 
         mu_count = 0
         colors = ['#D95319', '#EDB120', '#7E2F8E', '#77AC30']
@@ -339,21 +374,23 @@ class CCAMainWindow(QMainWindow):
                 self.plot_sources.plot(shifted, pen=pg.mkPen(color=color, width=1.5))
                 self.plot_sources.addItem(pg.ScatterPlotItem(x=peaks, y=shifted[peaks], size=8, pen=None, brush=pg.mkBrush('r')))
                 
-                # Ligne de seuil visuelle du K-Means
                 line = pg.InfiniteLine(angle=0, movable=False, pen=pg.mkPen('g', style=pg.QtCore.Qt.DashLine))
                 line.setPos(threshold + (idx * self.source_offset))
                 self.plot_sources.addItem(line)
                 
-                # ENREGISTREMENT POUR EXPORT
-                nom_mu = f"{mu_count}"
-                self.mu_spikes[nom_mu] = peaks
+                nom_mu = f"MU_{mu_count}"
                 
-                # STATS
+                # ENREGISTREMENTS POUR LES DEUX EXPORTS
+                self.mu_spikes[nom_mu] = peaks                 
+                self.mu_signals[nom_mu] = self.sources[idx]    
+                
+                # STATS (Avec ajout du PNR)
                 self.mu_stats.append({
                     "MU": nom_mu, 
                     "Nb_Spikes": len(peaks), 
                     "Fr_Hz": cand["fr"], 
                     "CoV_%": cand["cov"],
+                    "PNR_dB": cand["pnr"],
                     "Correlation_CCA": self.autocor[idx]
                 })
             else:
@@ -363,6 +400,7 @@ class CCAMainWindow(QMainWindow):
         if mu_count > 0: 
             self.btn_export_csv.setEnabled(True)
             self.btn_export_spikes.setEnabled(True) 
+            self.btn_export_sources.setEnabled(True) 
             self.btn_export_img.setEnabled(True)
 
     def export_stats_csv(self):
@@ -370,23 +408,43 @@ class CCAMainWindow(QMainWindow):
         file_path, _ = QFileDialog.getSaveFileName(self, "Export Stats", "", "CSV (*.csv)")
         if file_path: pd.DataFrame(self.mu_stats).round(4).to_csv(file_path, index=False, sep=';', decimal=',')
 
-    def export_spikes_csv(self):
-        if not self.mu_spikes: return
+    def export_sources_csv(self):
+        if not self.mu_signals: return
         options = QFileDialog.Options()
-        file_path, _ = QFileDialog.getSaveFileName(self, "Exporter les Instants de Décharge", "", "Fichier CSV (*.csv)", options=options)
+        file_path, _ = QFileDialog.getSaveFileName(self, "Exporter Sources Continues (Courbes)", "", "Fichier CSV (*.csv)", options=options)
         
         if file_path:
             if not file_path.endswith('.csv'): file_path += '.csv'
             try:
-                max_len = max([len(spk) for spk in self.mu_spikes.values()])
+                df_sources = pd.DataFrame(self.mu_signals)
+                df_sources.to_csv(file_path, index=False, sep=';')
+                QMessageBox.information(self, "Succès", "Sources continues exportées avec succès !\nChaque colonne représente l'onde continue d'une MU.")
+            except Exception as e:
+                QMessageBox.critical(self, "Erreur", f"Échec de l'exportation :\n{str(e)}")
+
+    def export_spikes_csv(self):
+        """ Exportation stricte en format Train de Dirac (0 et 1) """
+        if not self.mu_spikes or self.signal is None: return
+        options = QFileDialog.Options()
+        file_path, _ = QFileDialog.getSaveFileName(self, "Exporter Train de Dirac", "", "Fichier CSV (*.csv)", options=options)
+        
+        if file_path:
+            if not file_path.endswith('.csv'): file_path += '.csv'
+            try:
+                # Longueur exacte du signal original
+                signal_length = self.signal.shape[1] 
                 export_dict = {}
+                
                 for mu_name, spk in self.mu_spikes.items():
-                    padded_spk = np.pad(spk.astype(float), (0, max_len - len(spk)), constant_values=np.nan)
-                    export_dict[mu_name] = padded_spk
+                    dirac_train = np.zeros(signal_length, dtype=int)
+                    valid_spk = spk[spk < signal_length]
+                    dirac_train[valid_spk] = 1
+                    export_dict[mu_name] = dirac_train
                 
                 df_spikes = pd.DataFrame(export_dict)
                 df_spikes.to_csv(file_path, index=False, sep=';')
-                QMessageBox.information(self, "Succès", "Instants de décharge exportés avec succès !")
+                
+                QMessageBox.information(self, "Succès", "Train de Dirac exporté avec succès !\nIl est composé uniquement de 0 et de 1, sur toute la longueur du signal.")
             except Exception as e:
                 QMessageBox.critical(self, "Erreur", f"Échec de l'exportation :\n{str(e)}")
 
