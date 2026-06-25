@@ -76,7 +76,11 @@ def preprocess_signal(sig, fs=2048.0, f0=50.0):
     x_filt = filtfilt(b_notch, a_notch, x_filt, axis=1)
     return x_filt
 
-def detect_spikes_kmeans(source, fs=2048.0, min_distance_ms=10.0):
+# AVANT :
+# def detect_spikes_kmeans(source, fs=2048.0, min_distance_ms=10.0):
+
+# MAINTENANT : On impose une période réfractaire de 25 ms (limite physiologique à 40 Hz)
+def detect_spikes_kmeans(source, fs=2048.0, min_distance_ms=25.0):
     """ Binarisation K-Means avec calcul du PNR (Métrique MUedit) """
     signal_sq = source ** 2
     min_distance = int((min_distance_ms / 1000.0) * fs)
