@@ -360,6 +360,11 @@ class CCAMainWindow(QMainWindow):
                 if not candidates[j]["is_valid"] or candidates[j]["dup"]: continue
                 pi, pj = candidates[i]["peaks"], candidates[j]["peaks"]
                 common = sum(1 for p in pi if np.any(np.abs(pj - p) <= tol))
+                # if (common / min(len(pi), len(pj))) > sync_th:
+                #     # On garde l'unité qui a le meilleur PNR (le moins de bruit)
+                #     if candidates[i]["pnr"] > candidates[j]["pnr"]: candidates[j]["dup"] = True
+                #     else: candidates[i]["dup"] = True
+                # Déduplication (pour éliminer les clones créés par la CCA)
                 if (common / min(len(pi), len(pj))) > sync_th:
                     # On garde l'unité qui a le meilleur PNR (le moins de bruit)
                     if candidates[i]["pnr"] > candidates[j]["pnr"]: candidates[j]["dup"] = True
