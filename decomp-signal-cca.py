@@ -1,11 +1,6 @@
 import sys
 import os
 import site
-import numpy as np
-import pandas as pd
-from scipy.io import loadmat
-from scipy.signal import find_peaks, welch, butter, filtfilt, iirnotch
-from sklearn.cluster import KMeans
 
 # ==========================================
 # 1. CORRECTIF DES CHEMINS PYQT5 POUR WINDOWS
@@ -17,73 +12,100 @@ if sys.platform.startswith('win'):
     qt_paths.append(site.getusersitepackages())
     qt_paths.extend(sys.path)
     for base in qt_paths:
-        if not base: continue
+        if not base:
+            continue
         qt_bin = os.path.join(base, 'PyQt5', 'Qt5', 'bin')
         qt_plugins = os.path.join(base, 'PyQt5', 'Qt5', 'plugins')
         if os.path.isdir(qt_bin):
-            try: os.add_dll_directory(qt_bin)
-            except AttributeError: pass
+            try:
+                os.add_dll_directory(qt_bin)
+            except AttributeError:
+                pass
             os.environ['PATH'] = qt_bin + os.pathsep + os.environ.get('PATH', '')
         if os.path.isdir(qt_plugins):
             os.environ['QT_QPA_PLATFORM_PLUGIN_PATH'] = qt_plugins
         if os.path.isdir(qt_bin) or os.path.isdir(qt_plugins):
             break
 
+import numpy as np
+import pandas as pd
 import pyqtgraph as pg
-import pyqtgraph.exporters 
-from PyQt5.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, QHBoxLayout, 
+import pyqtgraph.exporters
+from scipy.io import loadmat
+from sklearn.cluster import KMeans
+from scipy.signal import find_peaks, welch, butter, filtfilt, iirnotch
+from PyQt5.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, QHBoxLayout,
                              QWidget, QPushButton, QSpinBox, QLabel, QFileDialog, QMessageBox, QDoubleSpinBox)
 
 # ==========================================
-# 2. ALGORITHMES MATHÉMATIQUES
+# 2. ALGORITHMES MATHÉMATIQUES ET PHYSIOLOGIQUES
 # ==========================================
 
-def CCAdecomp(sig, taux): # Fonction de décomposition CCA (Canonical Correlation Analysis)
-    # 1. Remove mean over time (axis=1)
+def CCAdecomp(sig, taux): 
+    """ 
+    BSS-CCA (Blind Source Separation via Canonical Correlation Analysis).
+    Sépare les sources en cherchant celles qui ont la plus forte autocorrélation
+    (celles qui se ressemblent le plus après un décalage temporel 'taux').
+    """
+    # 1. Centrage : On retire la moyenne temporelle de chaque canal pour centrer le signal sur zéro.
     sig = sig - sig.mean(axis=1, keepdims=True)
 
-    # 2. Build delayed versions
+    # 2. Décalage : Création de la matrice "présent" (x) et "futur" (y)
     x = sig[:, :-taux]
-    y = sig[:, taux:]   # shifted version (correct alignment)
+    y = sig[:, taux:]   
 
-    # 3. QR decompositions (on transposed to get same behavior)
-    Q_x, R_x = np.linalg.qr(x.T, mode='reduced')  # Q_x: (n_samples-taux, n_channels)
+    # 3. Blanchiment Spatial (Décomposition QR) : 
+    # Transforme les canaux très corrélés (effet du signal monopolaire) en canaux mathématiquement indépendants.
+    Q_x, R_x = np.linalg.qr(x.T, mode='reduced')  
     Q_y, R_y = np.linalg.qr(y.T, mode='reduced')
 
-    # 4. Singular Value Decomposition
+    # 4. Décomposition en Valeurs Singulières (SVD) :
+    # Isole les sources indépendantes. S contient les scores d'autocorrélation.
     U, S, Vt = np.linalg.svd(Q_x.T @ Q_y, full_matrices=False)
 
-    # 5. Canonical sources and correlations
-    sources = (Q_x @ U).T          # shape (n_components, n_samples - taux)
-    autocor = S                    # canonical correlations (singular values)
+    # 5. Extraction des ondes : Les Unités Motrices continues (Sources)
+    sources = (Q_x @ U).T          
+    autocor = S                    
 
-    # 6. Spatial filters (weights)
-    w_x = np.linalg.solve(R_x, U)  # shape (n_channels, n_components)
+    # 6. Filtres spatiaux : Matrice de démélange (Poids des électrodes)
+    w_x = np.linalg.solve(R_x, U)  
 
     return sources, w_x, autocor
 
+
 def preprocess_signal(sig, fs=2048.0, f0=50.0):
-    """ Filtres Physiologiques (Passe-bande 20-500Hz + Notch 50Hz) """
-    sig_mean = sig.mean(axis=1, keepdims=True)
-    x_c = sig - sig_mean
+    """ 
+    Filtres Physiologiques adaptés à l'enregistrement HD-sEMG Monopolaire.
+    Un signal monopolaire est plus étalé spectralement qu'un signal différentiel.
+    """
+    # # Centrage du signal brut
+    # sig_mean = sig.mean(axis=1, keepdims=True)
+    # x_c = sig - sig_mean
 
-    high_freq = min(500.0, (fs / 2) - 1)
-    b_band, a_band = butter(4, [20.0 / (fs / 2), high_freq / (fs / 2)], btype='band')
-    x_filt = filtfilt(b_band, a_band, x_c, axis=1)
+    # Filtre Passe-bande : 10 Hz à 250 Hz (Fréquences utiles d'un MUAP monopolaire)
+    high_freq = 250.0 
+    b_band, a_band = butter(4, [10.0 / (fs / 2), high_freq / (fs / 2)], btype='band')
+    # x_filt = filtfilt(b_band, a_band, x_c, axis=1)
+    x_filt = filtfilt(b_band, a_band, axis=1)
 
-    b_notch, a_notch = iirnotch(f0, 30.0, fs)
-    x_filt = filtfilt(b_notch, a_notch, x_filt, axis=1)
+    # # Filtre Notch : Rejet strict des interférences du courant secteur électrique (50 Hz)
+    # b_notch, a_notch = iirnotch(f0, 50.0, fs)
+    # x_filt = filtfilt(b_notch, a_notch, x_filt, axis=1)
+    
     return x_filt
 
-# AVANT :
-# def detect_spikes_kmeans(source, fs=2048.0, min_distance_ms=10.0):
 
-# Période réfractaire de 25 ms (limite physiologique à 40 Hz)
 def detect_spikes_kmeans(source, fs=2048.0, min_distance_ms=25.0):
-    """ Binarisation K-Means avec calcul du PNR (Métrique MUedit) """
+    """ 
+    Binarisation intelligente avec période réfractaire et K-Means à 3 clusters.
+    Permet d'extraire le Train de Dirac.
+    """
+    # 1. Mise au carré pour amplifier les pics et s'affranchir de la phase (positive/négative)
     signal_sq = source ** 2
-    min_distance = int((min_distance_ms / 1000.0) * fs)
     
+    # 2. Période réfractaire : Limite physiologique de la fréquence de décharge.
+    # Réglé sur 25 ms pour empêcher la détection des multiples lobes d'un même MUAP monopolaire large.
+    min_distance = int((min_distance_ms / 1000.0) * fs)
     peaks_candidats, _ = find_peaks(signal_sq, distance=min_distance)
     
     if len(peaks_candidats) < 5:
@@ -91,32 +113,95 @@ def detect_spikes_kmeans(source, fs=2048.0, min_distance_ms=25.0):
 
     valeurs_pics = signal_sq[peaks_candidats].reshape(-1, 1)
     
-    # Avant :
-    # kmeans = KMeans(n_clusters=2, random_state=42, n_init=10).fit(valeurs_pics)
-    
-    # MAINTENANT :
+    # 3. K-Means (3 clusters) : Séparation stricte de la dynamique du signal.
+    # - Cluster 1 : Bruit de fond
+    # - Cluster 2 : Artéfacts moyens / harmoniques
+    # - Cluster 3 : Les vrais MUAPs (les plus hautes amplitudes)
     kmeans = KMeans(n_clusters=3, random_state=42, n_init=10).fit(valeurs_pics)
+    
+    # Sélection automatique du cluster contenant les valeurs les plus élevées
     classe_spikes = np.argmax(kmeans.cluster_centers_)
     vrais_peaks = peaks_candidats[kmeans.labels_ == classe_spikes]
     
     if len(vrais_peaks) > 0:
         seuil_effectif = np.sqrt(np.min(valeurs_pics[kmeans.labels_ == classe_spikes]))
         
-        # --- CALCUL DU PNR (Pulse-to-Noise Ratio) ---
+        # 4. Calcul du PNR (Pulse-to-Noise Ratio)
+        # Mesure la qualité de séparation du neurone par rapport au bruit résiduel.
         spikes_power = np.mean(signal_sq[vrais_peaks])
         mask = np.ones(len(signal_sq), dtype=bool)
         mask[vrais_peaks] = False
         noise_power = np.mean(signal_sq[mask])
         pnr = 10 * np.log10(spikes_power / noise_power) if noise_power > 0 else 0
-        # ---------------------------------------------
     else:
         seuil_effectif = 0
         pnr = 0
         
     return vrais_peaks, seuil_effectif, pnr
 
+
 # ==========================================
-# 3. INTERFACE GRAPHIQUE PRINCIPALE
+# 3. FENÊTRE SECONDAIRE : VISUALISATION K-MEANS
+# ==========================================
+
+class KMeansPlotWindow(QWidget):
+    def __init__(self, source, fs, min_distance_ms, nom_mu):
+        super().__init__()
+        self.setWindowTitle(f"Analyse K-Means (3 Clusters) - {nom_mu}")
+        self.resize(1000, 600)
+        
+        layout = QVBoxLayout(self)
+        self.plot_widget = pg.PlotWidget(title=f"Séparation Bruit / Harmoniques / Vrais MUAPs ({nom_mu})")
+        self.plot_widget.setBackground('w')
+        self.plot_widget.addLegend()
+        self.plot_widget.setLabel('bottom', "Échantillons Temporels")
+        self.plot_widget.setLabel('left', "Amplitude au Carré")
+        layout.addWidget(self.plot_widget)
+        
+        # 1. Préparation du signal
+        signal_sq = source ** 2
+        min_distance = int((min_distance_ms / 1000.0) * fs)
+        peaks_candidats, _ = find_peaks(signal_sq, distance=min_distance)
+        
+        if len(peaks_candidats) < 3:
+            QMessageBox.warning(self, "Erreur", "Pas assez de pics pour le K-Means.")
+            return
+
+        valeurs_pics = signal_sq[peaks_candidats].reshape(-1, 1)
+        
+        # 2. Algorithme K-Means
+        kmeans = KMeans(n_clusters=3, random_state=42, n_init=10).fit(valeurs_pics)
+        labels = kmeans.labels_
+        
+        ordre_centres = np.argsort(kmeans.cluster_centers_.flatten())
+        cluster_bruit = ordre_centres[0]
+        cluster_moyen = ordre_centres[1]
+        cluster_muap  = ordre_centres[2]
+
+        # 3. Tracé du signal de fond (Gris clair)
+        self.plot_widget.plot(signal_sq, pen=pg.mkPen('#e0e0e0', width=1.5), name="Signal au carré")
+
+        # 4. Tracé des points par catégories
+        def add_scatter(cluster_id, color, name):
+            mask = (labels == cluster_id)
+            x_vals = peaks_candidats[mask]
+            y_vals = valeurs_pics[mask].flatten()
+            scatter = pg.ScatterPlotItem(x=x_vals, y=y_vals, size=10, pen=pg.mkPen('k'), brush=pg.mkBrush(color), name=name)
+            self.plot_widget.addItem(scatter)
+
+        add_scatter(cluster_bruit, '#3498db', "Bruit de fond")      # Bleu
+        add_scatter(cluster_moyen, '#f39c12', "Artefacts/Rebonds")  # Orange
+        add_scatter(cluster_muap, '#2ecc71', "Vrais MUAPs Validés") # Vert
+
+        # 5. Ligne Rouge du seuil effectif
+        seuil_effectif = np.min(valeurs_pics[labels == cluster_muap])
+        line = pg.InfiniteLine(angle=0, movable=False, pen=pg.mkPen('r', style=pg.QtCore.Qt.DashLine, width=2))
+        line.setPos(seuil_effectif)
+        self.plot_widget.addItem(line)
+
+
+# ==========================================
+# 4. INTERFACE GRAPHIQUE PRINCIPALE
 # ==========================================
 
 class CCAMainWindow(QMainWindow):
@@ -153,7 +238,7 @@ class CCAMainWindow(QMainWindow):
         lbl_taux = QLabel("Taux CCA :")
         self.spin_taux = QSpinBox()
         self.spin_taux.setRange(1, 500)
-        self.spin_taux.setValue(1) # Recommandé à 1 pour la stabilité
+        self.spin_taux.setValue(1)
 
         lbl_fs = QLabel("Fréq. Éch. (Hz) :")
         self.spin_fs = QSpinBox()
@@ -177,11 +262,16 @@ class CCAMainWindow(QMainWindow):
         self.btn_spikes.setEnabled(False)
         self.btn_spikes.setStyleSheet("background-color: #d1e7dd; font-weight: bold;")
 
-        # NOUVEAU REGLAGE PNR
+        # NOUVEAU BOUTON : Visualisation K-Means PyQtGraph
+        self.btn_plot_kmeans = QPushButton("🔍 Visualiser Clusters K-Means")
+        self.btn_plot_kmeans.clicked.connect(self.show_kmeans_plot)
+        self.btn_plot_kmeans.setEnabled(False)
+        self.btn_plot_kmeans.setStyleSheet("background-color: #fff3cd; font-weight: bold;")
+
         lbl_pnr = QLabel("PNR Min (dB) :")
         self.spin_pnr = QDoubleSpinBox()
         self.spin_pnr.setRange(0.0, 50.0)
-        self.spin_pnr.setValue(12.0) # 12 dB est une excellente valeur de base
+        self.spin_pnr.setValue(11.0)
 
         lbl_cov = QLabel("CoV Max (%) :")
         self.spin_cov = QDoubleSpinBox()
@@ -194,6 +284,7 @@ class CCAMainWindow(QMainWindow):
         self.spin_spec.setValue(30.0)
 
         layout_l2.addWidget(self.btn_spikes)
+        layout_l2.addWidget(self.btn_plot_kmeans)
         layout_l2.addSpacing(15)
         layout_l2.addWidget(lbl_pnr)
         layout_l2.addWidget(self.spin_pnr)
@@ -302,12 +393,8 @@ class CCAMainWindow(QMainWindow):
         if self.signal is None: return
         QApplication.setOverrideCursor(pg.QtCore.Qt.WaitCursor)
         try:
-            # 1. Filtre Physiologique
             filt_signal = preprocess_signal(self.signal, fs=self.spin_fs.value())
-            
-            # 2. CCA du Superviseur
             self.sources, w_x, self.autocor = CCAdecomp(filt_signal, self.spin_taux.value())
-            
             self.plot_sources.clear()
             self.source_offset = np.max(np.abs(self.sources)) * 1.5
             for i in range(self.sources.shape[0]):
@@ -328,8 +415,6 @@ class CCAMainWindow(QMainWindow):
         
         for i in range(self.sources.shape[0]):
             source = self.sources[i]
-            
-            # 3. K-MEANS + Récupération du PNR
             peaks, threshold, pnr = detect_spikes_kmeans(source, fs=fs)
             
             is_valid = False
@@ -337,9 +422,8 @@ class CCAMainWindow(QMainWindow):
             fr_hz = 0
             
             f, Pxx = welch(source, fs=fs, nperseg=1024)
-            mu_spec = (np.sum(Pxx[(f >= 70) & (f <= 400)]) / np.sum(Pxx)) * 100 if np.sum(Pxx)>0 else 0
+            mu_spec = (np.sum(Pxx[(f >= 10) & (f <= 250)]) / np.sum(Pxx)) * 100 if np.sum(Pxx)>0 else 0
             
-            # LE FILTRE FINAL : 15 pics min, Énergie OK, et PNR supérieur au réglage de l'interface
             if len(peaks) >= 15 and mu_spec >= self.spin_spec.value() and pnr >= self.spin_pnr.value():
                 isi = np.diff(peaks) 
                 valid_isi = isi[(isi > 0.5 * np.median(isi)) & (isi < 1.5 * np.median(isi))]
@@ -351,7 +435,6 @@ class CCAMainWindow(QMainWindow):
             
             candidates.append({"idx": i, "peaks": peaks, "is_valid": is_valid, "cov": cov_isi, "fr": fr_hz, "spec": mu_spec, "pnr": pnr, "dup": False, "threshold": threshold})
 
-        # Déduplication (pour éliminer les clones créés par la CCA)
         tol = int((fs / 1000.0) * 1.5) 
         sync_th = self.spin_sync.value() / 100.0 
         for i in range(len(candidates)):
@@ -360,13 +443,7 @@ class CCAMainWindow(QMainWindow):
                 if not candidates[j]["is_valid"] or candidates[j]["dup"]: continue
                 pi, pj = candidates[i]["peaks"], candidates[j]["peaks"]
                 common = sum(1 for p in pi if np.any(np.abs(pj - p) <= tol))
-                # if (common / min(len(pi), len(pj))) > sync_th:
-                #     # On garde l'unité qui a le meilleur PNR (le moins de bruit)
-                #     if candidates[i]["pnr"] > candidates[j]["pnr"]: candidates[j]["dup"] = True
-                #     else: candidates[i]["dup"] = True
-                # Déduplication (pour éliminer les clones créés par la CCA)
                 if (common / min(len(pi), len(pj))) > sync_th:
-                    # On garde l'unité qui a le meilleur PNR (le moins de bruit)
                     if candidates[i]["pnr"] > candidates[j]["pnr"]: candidates[j]["dup"] = True
                     else: candidates[i]["dup"] = True
 
@@ -388,11 +465,9 @@ class CCAMainWindow(QMainWindow):
                 
                 nom_mu = f"MU_{mu_count}"
                 
-                # ENREGISTREMENTS POUR LES DEUX EXPORTS
                 self.mu_spikes[nom_mu] = peaks                 
                 self.mu_signals[nom_mu] = self.sources[idx]    
                 
-                # STATS (Avec ajout du PNR)
                 self.mu_stats.append({
                     "MU": nom_mu, 
                     "Nb_Spikes": len(peaks), 
@@ -410,6 +485,18 @@ class CCAMainWindow(QMainWindow):
             self.btn_export_spikes.setEnabled(True) 
             self.btn_export_sources.setEnabled(True) 
             self.btn_export_img.setEnabled(True)
+            self.btn_plot_kmeans.setEnabled(True)
+
+    def show_kmeans_plot(self):
+        """ Ouvre la fenêtre d'analyse K-Means pour la première UM trouvée """
+        if not self.mu_signals: return
+        
+        nom_mu = list(self.mu_signals.keys())[0]
+        source = self.mu_signals[nom_mu]
+        fs = self.spin_fs.value()
+        
+        self.kmeans_window = KMeansPlotWindow(source, fs, 25.0, nom_mu)
+        self.kmeans_window.show()
 
     def export_stats_csv(self):
         if not self.mu_stats: return
@@ -431,7 +518,6 @@ class CCAMainWindow(QMainWindow):
                 QMessageBox.critical(self, "Erreur", f"Échec de l'exportation :\n{str(e)}")
 
     def export_spikes_csv(self):
-        """ Exportation stricte en format Train de Dirac (0 et 1) """
         if not self.mu_spikes or self.signal is None: return
         options = QFileDialog.Options()
         file_path, _ = QFileDialog.getSaveFileName(self, "Exporter Train de Dirac", "", "Fichier CSV (*.csv)", options=options)
@@ -439,7 +525,6 @@ class CCAMainWindow(QMainWindow):
         if file_path:
             if not file_path.endswith('.csv'): file_path += '.csv'
             try:
-                # Longueur exacte du signal original
                 signal_length = self.signal.shape[1] 
                 export_dict = {}
                 
