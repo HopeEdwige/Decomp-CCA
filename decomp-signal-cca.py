@@ -79,18 +79,18 @@ def preprocess_signal(sig, fs=2048.0, f0=50.0):
     Un signal monopolaire est plus étalé spectralement qu'un signal différentiel.
     """
     # # Centrage du signal brut
-    # sig_mean = sig.mean(axis=1, keepdims=True)
-    # x_c = sig - sig_mean
+    sig_mean = sig.mean(axis=1, keepdims=True)
+    x_c = sig - sig_mean
 
     # Filtre Passe-bande : 10 Hz à 250 Hz (Fréquences utiles d'un MUAP monopolaire)
     high_freq = 250.0 
     b_band, a_band = butter(4, [10.0 / (fs / 2), high_freq / (fs / 2)], btype='band')
-    # x_filt = filtfilt(b_band, a_band, x_c, axis=1)
-    x_filt = filtfilt(b_band, a_band, axis=1)
+    x_filt = filtfilt(b_band, a_band, x_c, axis=1)
+    # x_filt = filtfilt(b_band, a_band, axis=1)
 
     # # Filtre Notch : Rejet strict des interférences du courant secteur électrique (50 Hz)
-    # b_notch, a_notch = iirnotch(f0, 50.0, fs)
-    # x_filt = filtfilt(b_notch, a_notch, x_filt, axis=1)
+    b_notch, a_notch = iirnotch(f0, 50.0, fs)
+    x_filt = filtfilt(b_notch, a_notch, x_filt, axis=1)
     
     return x_filt
 
