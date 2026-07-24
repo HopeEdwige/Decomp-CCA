@@ -1,6 +1,23 @@
 import sys
 import os
 import site
+import re
+import numpy as np
+import pandas as pd
+import pyqtgraph as pg
+import pyqtgraph.exporters
+from scipy.io import loadmat
+from sklearn.cluster import KMeans
+from scipy.signal import find_peaks, welch, butter, filtfilt, iirnotch
+from PyQt5.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, QHBoxLayout,
+                             QWidget, QPushButton, QSpinBox, QLabel, QFileDialog, 
+                             QMessageBox, QDoubleSpinBox, QComboBox)
+
+# IMPORT PLOTLY POUR LE GRAPHIQUE K-MEANS
+import plotly.graph_objects as go
+import plotly.io as pio
+pio.renderers.default = 'browser'
+
 
 # ==========================================
 # 1. CORRECTIF DES CHEMINS PYQT5 POUR WINDOWS
@@ -27,85 +44,38 @@ if sys.platform.startswith('win'):
         if os.path.isdir(qt_bin) or os.path.isdir(qt_plugins):
             break
 
-import numpy as np
-import pandas as pd
-import pyqtgraph as pg
-import pyqtgraph.exporters
-from scipy.io import loadmat
-from sklearn.cluster import KMeans
-from scipy.signal import find_peaks, welch, butter, filtfilt, iirnotch
-from PyQt5.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, QHBoxLayout,
-                             QWidget, QPushButton, QSpinBox, QLabel, QFileDialog, QMessageBox, QDoubleSpinBox)
-
 # ==========================================
 # 2. ALGORITHMES MATHÉMATIQUES ET PHYSIOLOGIQUES
 # ==========================================
 
 def CCAdecomp(sig, taux): 
-    """ 
-    BSS-CCA (Blind Source Separation via Canonical Correlation Analysis).
-    Sépare les sources en cherchant celles qui ont la plus forte autocorrélation
-    (celles qui se ressemblent le plus après un décalage temporel 'taux').
-    """
-    # 1. Centrage : On retire la moyenne temporelle de chaque canal pour centrer le signal sur zéro.
     sig = sig - sig.mean(axis=1, keepdims=True)
-
-    # 2. Décalage : Création de la matrice "présent" (x) et "futur" (y)
     x = sig[:, :-taux]
     y = sig[:, taux:]   
-
-    # 3. Blanchiment Spatial (Décomposition QR) : 
-    # Transforme les canaux très corrélés (effet du signal monopolaire) en canaux mathématiquement indépendants.
     Q_x, R_x = np.linalg.qr(x.T, mode='reduced')  
     Q_y, R_y = np.linalg.qr(y.T, mode='reduced')
-
-    # 4. Décomposition en Valeurs Singulières (SVD) :
-    # Isole les sources indépendantes. S contient les scores d'autocorrélation.
     U, S, Vt = np.linalg.svd(Q_x.T @ Q_y, full_matrices=False)
-
-    # 5. Extraction des ondes : Les Unités Motrices continues (Sources)
     sources = (Q_x @ U).T          
     autocor = S                    
-
-    # 6. Filtres spatiaux : Matrice de démélange (Poids des électrodes)
     w_x = np.linalg.solve(R_x, U)  
-
     return sources, w_x, autocor
 
 
 def preprocess_signal(sig, fs=2048.0, f0=50.0):
-    """ 
-    Filtres Physiologiques adaptés à l'enregistrement HD-sEMG Monopolaire.
-    Un signal monopolaire est plus étalé spectralement qu'un signal différentiel.
-    """
-    # # Centrage du signal brut
     sig_mean = sig.mean(axis=1, keepdims=True)
     x_c = sig - sig_mean
-
-    # Filtre Passe-bande : 10 Hz à 250 Hz (Fréquences utiles d'un MUAP monopolaire)
     high_freq = 250.0 
     b_band, a_band = butter(4, [10.0 / (fs / 2), high_freq / (fs / 2)], btype='band')
     x_filt = filtfilt(b_band, a_band, x_c, axis=1)
-    # x_filt = filtfilt(b_band, a_band, axis=1)
-
-    # # Filtre Notch : Rejet strict des interférences du courant secteur électrique (50 Hz)
-    b_notch, a_notch = iirnotch(f0, 50.0, fs)
+    b_notch, a_notch = iirnotch(f0, 30.0, fs)
     x_filt = filtfilt(b_notch, a_notch, x_filt, axis=1)
-    
     return x_filt
 
 
 def detect_spikes_kmeans(source, fs=2048.0, min_distance_ms=25.0):
-    """ 
-    Binarisation intelligente avec période réfractaire et K-Means à 3 clusters.
-    Permet d'extraire le Train de Dirac.
-    """
-    # 1. Mise au carré pour amplifier les pics et s'affranchir de la phase (positive/négative)
     signal_sq = source ** 2
-    
-    # 2. Période réfractaire : Limite physiologique de la fréquence de décharge.
-    # Réglé sur 25 ms pour empêcher la détection des multiples lobes d'un même MUAP monopolaire large.
     min_distance = int((min_distance_ms / 1000.0) * fs)
+    
     peaks_candidats, _ = find_peaks(signal_sq, distance=min_distance)
     
     if len(peaks_candidats) < 5:
@@ -113,21 +83,12 @@ def detect_spikes_kmeans(source, fs=2048.0, min_distance_ms=25.0):
 
     valeurs_pics = signal_sq[peaks_candidats].reshape(-1, 1)
     
-    # 3. K-Means (3 clusters) : Séparation stricte de la dynamique du signal.
-    # - Cluster 1 : Bruit de fond
-    # - Cluster 2 : Artéfacts moyens / harmoniques
-    # - Cluster 3 : Les vrais MUAPs (les plus hautes amplitudes)
     kmeans = KMeans(n_clusters=3, random_state=42, n_init=10).fit(valeurs_pics)
-    
-    # Sélection automatique du cluster contenant les valeurs les plus élevées
     classe_spikes = np.argmax(kmeans.cluster_centers_)
     vrais_peaks = peaks_candidats[kmeans.labels_ == classe_spikes]
     
     if len(vrais_peaks) > 0:
         seuil_effectif = np.sqrt(np.min(valeurs_pics[kmeans.labels_ == classe_spikes]))
-        
-        # 4. Calcul du PNR (Pulse-to-Noise Ratio)
-        # Mesure la qualité de séparation du neurone par rapport au bruit résiduel.
         spikes_power = np.mean(signal_sq[vrais_peaks])
         mask = np.ones(len(signal_sq), dtype=bool)
         mask[vrais_peaks] = False
@@ -158,7 +119,6 @@ class KMeansPlotWindow(QWidget):
         self.plot_widget.setLabel('left', "Amplitude au Carré")
         layout.addWidget(self.plot_widget)
         
-        # 1. Préparation du signal
         signal_sq = source ** 2
         min_distance = int((min_distance_ms / 1000.0) * fs)
         peaks_candidats, _ = find_peaks(signal_sq, distance=min_distance)
@@ -169,7 +129,6 @@ class KMeansPlotWindow(QWidget):
 
         valeurs_pics = signal_sq[peaks_candidats].reshape(-1, 1)
         
-        # 2. Algorithme K-Means
         kmeans = KMeans(n_clusters=3, random_state=42, n_init=10).fit(valeurs_pics)
         labels = kmeans.labels_
         
@@ -178,10 +137,8 @@ class KMeansPlotWindow(QWidget):
         cluster_moyen = ordre_centres[1]
         cluster_muap  = ordre_centres[2]
 
-        # 3. Tracé du signal de fond (Gris clair)
         self.plot_widget.plot(signal_sq, pen=pg.mkPen('#e0e0e0', width=1.5), name="Signal au carré")
 
-        # 4. Tracé des points par catégories
         def add_scatter(cluster_id, color, name):
             mask = (labels == cluster_id)
             x_vals = peaks_candidats[mask]
@@ -189,11 +146,10 @@ class KMeansPlotWindow(QWidget):
             scatter = pg.ScatterPlotItem(x=x_vals, y=y_vals, size=10, pen=pg.mkPen('k'), brush=pg.mkBrush(color), name=name)
             self.plot_widget.addItem(scatter)
 
-        add_scatter(cluster_bruit, '#3498db', "Bruit de fond")      # Bleu
-        add_scatter(cluster_moyen, '#f39c12', "Artefacts/Rebonds")  # Orange
-        add_scatter(cluster_muap, '#2ecc71', "Vrais MUAPs Validés") # Vert
+        add_scatter(cluster_bruit, '#3498db', "Bruit de fond")      
+        add_scatter(cluster_moyen, '#f39c12', "Artefacts/Rebonds")  
+        add_scatter(cluster_muap, '#2ecc71', "Vrais MUAPs Validés") 
 
-        # 5. Ligne Rouge du seuil effectif
         seuil_effectif = np.min(valeurs_pics[labels == cluster_muap])
         line = pg.InfiniteLine(angle=0, movable=False, pen=pg.mkPen('r', style=pg.QtCore.Qt.DashLine, width=2))
         line.setPos(seuil_effectif)
@@ -215,9 +171,12 @@ class CCAMainWindow(QMainWindow):
         self.autocor = None
         self.source_offset = 0
         self.mu_stats = []
-        self.mu_spikes = {}   # Pour le Train de Dirac
-        self.mu_signals = {}  # Pour les Sources continues
+        self.mu_spikes = {}   
+        self.mu_signals = {}  
         
+        self.current_dir = ""
+        self.current_filename = "Signal"
+
         self.initUI()
 
     def initUI(self):
@@ -229,6 +188,18 @@ class CCAMainWindow(QMainWindow):
         layout_l1 = QHBoxLayout()
         self.btn_load = QPushButton("📂 Charger fichier")
         self.btn_load.clicked.connect(self.open_file)
+
+        lbl_type = QLabel("Type :")
+        self.combo_type = QComboBox()
+        self.combo_type.setEditable(True)
+        self.combo_type.addItems(["Normal", "Fatigue", "Isometrique", "Dynamique"])
+        self.combo_type.setToolTip("Type du signal (peut être modifié manuellement)")
+
+        lbl_rep = QLabel("Répétition :")
+        self.spin_rep = QSpinBox()
+        self.spin_rep.setRange(1, 100)
+        self.spin_rep.setValue(1)
+        self.spin_rep.setPrefix("Rep ")
 
         self.btn_run_cca = QPushButton("⚡ Décomposition CCA")
         self.btn_run_cca.clicked.connect(self.run_cca)
@@ -247,10 +218,16 @@ class CCAMainWindow(QMainWindow):
         self.spin_fs.setSingleStep(100)
 
         layout_l1.addWidget(self.btn_load)
+        layout_l1.addSpacing(15)
+        layout_l1.addWidget(lbl_type)
+        layout_l1.addWidget(self.combo_type)
+        layout_l1.addWidget(lbl_rep)
+        layout_l1.addWidget(self.spin_rep)
+        layout_l1.addSpacing(30)
         layout_l1.addWidget(self.btn_run_cca)
         layout_l1.addWidget(lbl_taux)
         layout_l1.addWidget(self.spin_taux)
-        layout_l1.addSpacing(20)
+        layout_l1.addSpacing(15)
         layout_l1.addWidget(lbl_fs)
         layout_l1.addWidget(self.spin_fs)
         layout_l1.addStretch()
@@ -262,7 +239,6 @@ class CCAMainWindow(QMainWindow):
         self.btn_spikes.setEnabled(False)
         self.btn_spikes.setStyleSheet("background-color: #d1e7dd; font-weight: bold;")
 
-        # NOUVEAU BOUTON : Visualisation K-Means PyQtGraph
         self.btn_plot_kmeans = QPushButton("🔍 Visualiser Clusters K-Means")
         self.btn_plot_kmeans.clicked.connect(self.show_kmeans_plot)
         self.btn_plot_kmeans.setEnabled(False)
@@ -316,17 +292,12 @@ class CCAMainWindow(QMainWindow):
         self.btn_export_spikes.setEnabled(False)
         self.btn_export_spikes.setStyleSheet("background-color: #e2e3e5; font-weight: bold; color: #052c65;")
 
-        self.btn_export_img = QPushButton("📸 Export Image")
-        self.btn_export_img.clicked.connect(self.export_as_image)
-        self.btn_export_img.setEnabled(False)
-
         layout_l3.addWidget(lbl_sync)
         layout_l3.addWidget(self.spin_sync)
         layout_l3.addStretch()
         layout_l3.addWidget(self.btn_export_csv)
         layout_l3.addWidget(self.btn_export_sources)
         layout_l3.addWidget(self.btn_export_spikes)
-        layout_l3.addWidget(self.btn_export_img)
 
         main_layout.addLayout(layout_l1)
         main_layout.addLayout(layout_l2)
@@ -376,6 +347,23 @@ class CCAMainWindow(QMainWindow):
     def open_file(self):
         path, _ = QFileDialog.getOpenFileName(self, "Ouvrir un signal", "", "Data Files (*.mat)")
         if not path: return
+        
+        self.current_dir = os.path.dirname(path)
+        self.current_filename = os.path.splitext(os.path.basename(path))[0]
+        
+        # --- Extraction Intelligente du Type et de la Répétition ---
+        name_for_regex = self.current_filename.lower()
+        
+        # 1. Trouver le numéro de répétition (ex: rep1, rep2)
+        match_rep = re.search(r'rep(\d+)', name_for_regex)
+        if match_rep:
+            self.spin_rep.setValue(int(match_rep.group(1)))
+            
+        # 2. Extraire le type (en retirant _repX du nom du fichier)
+        type_guess = re.sub(r'_?rep\d+', '', self.current_filename, flags=re.IGNORECASE).strip('_')
+        if type_guess:
+            self.combo_type.setCurrentText(type_guess)
+        
         try:
             mat = loadmat(path, simplify_cells=True)
             best_data = self._find_largest_numeric_2d(mat)
@@ -484,70 +472,90 @@ class CCAMainWindow(QMainWindow):
             self.btn_export_csv.setEnabled(True)
             self.btn_export_spikes.setEnabled(True) 
             self.btn_export_sources.setEnabled(True) 
-            self.btn_export_img.setEnabled(True)
             self.btn_plot_kmeans.setEnabled(True)
+            
+            # --- DÉCLENCHEMENT SAUVEGARDE AUTOMATIQUE ---
+            self.auto_export_results()
+
+    def get_structured_filename(self):
+        """ Génère le nom de base en combinant Type et Repétition """
+        type_val = self.combo_type.currentText().strip()
+        rep_val = self.spin_rep.value()
+        
+        if not type_val:
+            type_val = "Signal"
+            
+        return f"{type_val}_rep{rep_val}"
+
+    def auto_export_results(self):
+        """ Sauvegarde automatiquement les fichiers structurés par Type et Répétition """
+        if not self.mu_stats or self.signal is None: return
+        
+        base_name = self.get_structured_filename()
+        
+        path_stats = os.path.join(self.current_dir, f"Stats/Stats_{base_name}.csv")
+        path_sources = os.path.join(self.current_dir, f"Stats/Sources_{base_name}.csv")
+        path_spikes = os.path.join(self.current_dir, f"Stats/Spike_{base_name}.csv")
+        
+        try:
+            pd.DataFrame(self.mu_stats).round(4).to_csv(path_stats, index=False, sep=';', decimal=',')
+            pd.DataFrame(self.mu_signals).to_csv(path_sources, index=False, sep=';')
+            
+            signal_length = self.signal.shape[1] 
+            export_dict = {}
+            for mu_name, spk in self.mu_spikes.items():
+                dirac_train = np.zeros(signal_length, dtype=int)
+                valid_spk = spk[spk < signal_length]
+                dirac_train[valid_spk] = 1
+                export_dict[mu_name] = dirac_train
+            pd.DataFrame(export_dict).to_csv(path_spikes, index=False, sep=';')
+            
+            print(f"✅ Sauvegarde auto : Stats_{base_name}, Sources_{base_name}, Spike_{base_name}")
+            
+        except Exception as e:
+            print(f"❌ Erreur sauvegarde : {e}")
 
     def show_kmeans_plot(self):
-        """ Ouvre la fenêtre d'analyse K-Means pour la première UM trouvée """
         if not self.mu_signals: return
-        
         nom_mu = list(self.mu_signals.keys())[0]
         source = self.mu_signals[nom_mu]
         fs = self.spin_fs.value()
-        
         self.kmeans_window = KMeansPlotWindow(source, fs, 25.0, nom_mu)
         self.kmeans_window.show()
 
     def export_stats_csv(self):
         if not self.mu_stats: return
-        file_path, _ = QFileDialog.getSaveFileName(self, "Export Stats", "", "CSV (*.csv)")
+        base_name = self.get_structured_filename()
+        file_path, _ = QFileDialog.getSaveFileName(self, "Export Stats", f"Stats_{base_name}.csv", "CSV (*.csv)")
         if file_path: pd.DataFrame(self.mu_stats).round(4).to_csv(file_path, index=False, sep=';', decimal=',')
 
     def export_sources_csv(self):
         if not self.mu_signals: return
+        base_name = self.get_structured_filename()
         options = QFileDialog.Options()
-        file_path, _ = QFileDialog.getSaveFileName(self, "Exporter Sources Continues (Courbes)", "", "Fichier CSV (*.csv)", options=options)
+        file_path, _ = QFileDialog.getSaveFileName(self, "Exporter Sources Continues", f"Sources_{base_name}.csv", "Fichier CSV (*.csv)", options=options)
         
         if file_path:
             if not file_path.endswith('.csv'): file_path += '.csv'
-            try:
-                df_sources = pd.DataFrame(self.mu_signals)
-                df_sources.to_csv(file_path, index=False, sep=';')
-                QMessageBox.information(self, "Succès", "Sources continues exportées avec succès !\nChaque colonne représente l'onde continue d'une MU.")
-            except Exception as e:
-                QMessageBox.critical(self, "Erreur", f"Échec de l'exportation :\n{str(e)}")
+            pd.DataFrame(self.mu_signals).to_csv(file_path, index=False, sep=';')
 
     def export_spikes_csv(self):
         if not self.mu_spikes or self.signal is None: return
+        base_name = self.get_structured_filename()
         options = QFileDialog.Options()
-        file_path, _ = QFileDialog.getSaveFileName(self, "Exporter Train de Dirac", "", "Fichier CSV (*.csv)", options=options)
+        file_path, _ = QFileDialog.getSaveFileName(self, "Exporter Train de Dirac", f"Spike_{base_name}.csv", "Fichier CSV (*.csv)", options=options)
         
         if file_path:
             if not file_path.endswith('.csv'): file_path += '.csv'
-            try:
-                signal_length = self.signal.shape[1] 
-                export_dict = {}
-                
-                for mu_name, spk in self.mu_spikes.items():
-                    dirac_train = np.zeros(signal_length, dtype=int)
-                    valid_spk = spk[spk < signal_length]
-                    dirac_train[valid_spk] = 1
-                    export_dict[mu_name] = dirac_train
-                
-                df_spikes = pd.DataFrame(export_dict)
-                df_spikes.to_csv(file_path, index=False, sep=';')
-                
-                QMessageBox.information(self, "Succès", "Train de Dirac exporté avec succès !\nIl est composé uniquement de 0 et de 1, sur toute la longueur du signal.")
-            except Exception as e:
-                QMessageBox.critical(self, "Erreur", f"Échec de l'exportation :\n{str(e)}")
-
-    def export_as_image(self):
-        if self.sources is None: return
-        file_path, _ = QFileDialog.getSaveFileName(self, "Export Image", "", "PNG (*.png)")
-        if file_path:
-            exporter = pg.exporters.ImageExporter(self.plot_sources.plotItem)
-            exporter.parameters()['width'] = 2500 
-            exporter.export(file_path)
+            signal_length = self.signal.shape[1] 
+            export_dict = {}
+            for mu_name, spk in self.mu_spikes.items():
+                dirac_train = np.zeros(signal_length, dtype=int)
+                valid_spk = spk[spk < signal_length]
+                dirac_train[valid_spk] = 1
+                export_dict[mu_name] = dirac_train
+            
+            pd.DataFrame(export_dict).to_csv(file_path, index=False, sep=';')
 
 if __name__ == '__main__':
     app = QApplication.instance() or QApplication(sys.argv)
