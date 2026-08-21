@@ -487,15 +487,50 @@ class CCAMainWindow(QMainWindow):
             
         return f"{type_val}_rep{rep_val}"
 
+    # def auto_export_results(self):
+    #     """ Sauvegarde automatiquement les fichiers structurés par Type et Répétition """
+    #     if not self.mu_stats or self.signal is None: return
+        
+    #     base_name = self.get_structured_filename()
+        
+    #     path_stats = os.path.join(self.current_dir, f"Stats/Stats_{base_name}.csv")
+    #     path_sources = os.path.join(self.current_dir, f"Stats/Sources_{base_name}.csv")
+    #     path_spikes = os.path.join(self.current_dir, f"Stats/Spike_{base_name}.csv")
+        
+    #     try:
+    #         pd.DataFrame(self.mu_stats).round(4).to_csv(path_stats, index=False, sep=';', decimal=',')
+    #         pd.DataFrame(self.mu_signals).to_csv(path_sources, index=False, sep=';')
+            
+    #         signal_length = self.signal.shape[1] 
+    #         export_dict = {}
+    #         for mu_name, spk in self.mu_spikes.items():
+    #             dirac_train = np.zeros(signal_length, dtype=int)
+    #             valid_spk = spk[spk < signal_length]
+    #             dirac_train[valid_spk] = 1
+    #             export_dict[mu_name] = dirac_train
+    #         pd.DataFrame(export_dict).to_csv(path_spikes, index=False, sep=';')
+            
+    #         print(f"✅ Sauvegarde auto : Stats_{base_name}, Sources_{base_name}, Spike_{base_name}")
+            
+    #     except Exception as e:
+    #         print(f"❌ Erreur sauvegarde : {e}")
+
     def auto_export_results(self):
         """ Sauvegarde automatiquement les fichiers structurés par Type et Répétition """
         if not self.mu_stats or self.signal is None: return
         
         base_name = self.get_structured_filename()
         
-        path_stats = os.path.join(self.current_dir, f"Stats/Stats_{base_name}.csv")
-        path_sources = os.path.join(self.current_dir, f"Stats/Sources_{base_name}.csv")
-        path_spikes = os.path.join(self.current_dir, f"Stats/Spike_{base_name}.csv")
+        # --- LE BON RÉPERTOIRE D'EXPORT ---
+        export_dir = r"C:\Users\Etudiant\Documents\Edwige\CODE\Decomp-CCA\Stats"
+        
+        # S'assurer que le dossier Stats existe bien (le crée s'il manque)
+        os.makedirs(export_dir, exist_ok=True)
+        
+        # Construire les chemins complets vers le bon dossier
+        path_stats = os.path.join(export_dir, f"Stats_{base_name}.csv")
+        path_sources = os.path.join(export_dir, f"Sources_{base_name}.csv")
+        path_spikes = os.path.join(export_dir, f"Spike_{base_name}.csv")
         
         try:
             pd.DataFrame(self.mu_stats).round(4).to_csv(path_stats, index=False, sep=';', decimal=',')
@@ -510,7 +545,7 @@ class CCAMainWindow(QMainWindow):
                 export_dict[mu_name] = dirac_train
             pd.DataFrame(export_dict).to_csv(path_spikes, index=False, sep=';')
             
-            print(f"✅ Sauvegarde auto : Stats_{base_name}, Sources_{base_name}, Spike_{base_name}")
+            print(f"✅ Sauvegarde auto réussie dans : {export_dir}")
             
         except Exception as e:
             print(f"❌ Erreur sauvegarde : {e}")
