@@ -4,19 +4,9 @@ import site
 import re
 import numpy as np
 import pandas as pd
-import pyqtgraph as pg
-import pyqtgraph.exporters
 from scipy.io import loadmat
 from sklearn.cluster import KMeans
 from scipy.signal import find_peaks, welch, butter, filtfilt, iirnotch
-from PyQt5.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, QHBoxLayout,
-                             QWidget, QPushButton, QSpinBox, QLabel, QFileDialog, 
-                             QMessageBox, QDoubleSpinBox, QComboBox)
-
-# IMPORT PLOTLY POUR LE GRAPHIQUE K-MEANS
-import plotly.graph_objects as go
-import plotly.io as pio
-pio.renderers.default = 'browser'
 
 
 # ==========================================
@@ -47,6 +37,17 @@ if sys.platform.startswith('win'):
 # ==========================================
 # 2. ALGORITHMES MATHÉMATIQUES ET PHYSIOLOGIQUES
 # ==========================================
+
+import pyqtgraph as pg
+import pyqtgraph.exporters
+from PyQt5.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, QHBoxLayout,
+                             QWidget, QPushButton, QSpinBox, QLabel, QFileDialog,
+                             QMessageBox, QDoubleSpinBox, QComboBox)
+
+# IMPORT PLOTLY POUR LE GRAPHIQUE K-MEANS
+import plotly.graph_objects as go
+import plotly.io as pio
+pio.renderers.default = 'browser'
 
 def CCAdecomp(sig, taux): 
     sig = sig - sig.mean(axis=1, keepdims=True)
@@ -521,8 +522,9 @@ class CCAMainWindow(QMainWindow):
         
         base_name = self.get_structured_filename()
         
-        # --- LE BON RÉPERTOIRE D'EXPORT ---
-        export_dir = r"C:\Users\Etudiant\Documents\Edwige\CODE\Decomp-CCA\Stats"
+        # --- Répertoire Stats du projet, quel que soit le compte Windows ---
+        project_dir = os.path.dirname(os.path.abspath(__file__))
+        export_dir = os.path.join(project_dir, "Stats")
         
         # S'assurer que le dossier Stats existe bien (le crée s'il manque)
         os.makedirs(export_dir, exist_ok=True)

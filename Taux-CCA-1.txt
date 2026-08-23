@@ -1,0 +1,6 @@
+Taux CCA : 1
+Fréq. Ech. 20248
+PNR Min (dB) : 12 
+CoV Max (%) : 35
+Energie Spectral Min (%) : 30
+Taux de Coincidence Max (%) : 30
